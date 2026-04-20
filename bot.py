@@ -72,19 +72,24 @@ def detect_type(text):
     return "светский"
 
 # ---------- Промпт ----------
-PROMPT = """Ты — профессиональный копирайтер. Сгенерируй поздравление по данным:
+PROMPT = """Ты — профессиональный копирайтер с 10-летним опытом. Сгенерируй тёплое, искреннее поздравление по данным:
+
 ИМЯ: {name}
 ПОВОД: {occasion}
 ТИП: {holiday_type}
 ФАКТЫ: {facts}
 ТОН: {tone}
+
 ПРАВИЛА:
-1. Если тип="православный": тон уважительный, традиционный. Без юмора.
-2. Если тип="корпоративный": профессионально, без панибратства.
-3. Обязательно вплетай минимум 1 факт.
-4. Запрещены клише: "счастья, здоровья, успехов, долгих лет".
-5. Максимум 3-4 предложения. Живой язык.
-6. Верни ТОЛЬКО текст поздравления. Без вступлений и подписей."""
+1. Если тип="православный": тон уважительный, традиционный. Используй "Христос Воскресе", "светлого праздника". Без юмора.
+2. Если тип="корпоративный": профессионально, с уважением, без панибратства.
+3. Если тон="с юмором": лёгкий, добрый юмор. Без сарказма и обидных шуток.
+4. Обязательно органично вплетай минимум 1 факт из {facts}.
+5. Избегай клише: "счастья, здоровья, успехов, долгих лет, исполнения желаний, благополучия".
+6. Используй живой, разговорный язык. Обращайся на "ты" (если не корпоративный).
+7. Максимум 3-4 предложения. Без воды.
+8. Правильные падежи и согласования.
+9. Верни ТОЛЬКО текст поздравления. Без вступлений, пояснений и подписей."""
 
 # ---------- FSM ----------
 class CongratsFSM(StatesGroup):
@@ -97,20 +102,20 @@ class CongratsFSM(StatesGroup):
 async def cmd_start(m: types.Message, state: FSMContext):
     await state.clear()
     get_user(m.from_user.id)
-    await m.answer("🎉 Привет! Напишу живое поздравление за 10 сек.\n\n👤 <b>Кого поздравляем?</b> (имя)")
+    await m.answer("🎉 Привет! Напишу живое поздравление за 10 сек.\n\n👤 <b>Кого поздравляем?</b> (имя)",parse_mode="HTML")
     await state.set_state(CongratsFSM.name)
 
 @dp.message(CongratsFSM.name)
 async def get_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text.strip())
-    await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, корпоратив...)")
+    await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, корпоратив...)?", parse_mode="HTML")
     await state.set_state(CongratsFSM.occasion)
 
 @dp.message(CongratsFSM.occasion)
 async def get_occasion(m: types.Message, state: FSMContext):
     await state.update_data(occasion=m.text.strip())
     await state.update_data(holiday_type=detect_type(m.text.strip()))
-    await m.answer("🤫 <b>1-2 факта/детали.</b>\nПримеры: «вечно опаздывает», «любит рыбалку», «готовит лучшие блины»")
+    await m.answer("🤫 <b>1-2 факта/детали.</b>\nПримеры: «вечно опаздывает», «любит рыбалку», «готовит лучшие блины»", parse_mode="HTML")
     await state.set_state(CongratsFSM.facts)
 
 @dp.message(CongratsFSM.facts)
@@ -123,7 +128,7 @@ async def get_facts(m: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="📱 Для сторис", callback_data="tone_stories")],
         [InlineKeyboardButton(text="😈 С юмором", callback_data="tone_funny")]
     ])
-    await m.answer("Выбери тон:", reply_markup=kb)
+    await m.answer("Выбери тон:", reply_markup=kb, parse_mode="HTML")
     logging.info(f"✅ [get_facts] Кнопки отправлены {m.from_user.id}")
     await state.set_state(CongratsFSM.tone)
 
