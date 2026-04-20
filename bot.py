@@ -11,20 +11,21 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 
-# Загрузка .env
+# Загрузка переменных
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "CongratsTurnKeyBot")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "CongratsTurnBot")
 PAYMENT_URL = os.getenv("PAYMENT_URL", "#")
 
-logging.basicConfig(level=logging.INFO)
+# Логирование
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # ---------- База данных ----------
-DB_PATH = os.path.join(os.path.dirname(__file__), "congrats.db")
+DB_PATH = "congrats.db"
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -114,13 +115,16 @@ async def get_occasion(m: types.Message, state: FSMContext):
 
 @dp.message(CongratsFSM.facts)
 async def get_facts(m: types.Message, state: FSMContext):
+    logging.info(f"📝 [get_facts] Получено от {m.from_user.id}: {m.text}")
     await state.update_data(facts=m.text.strip())
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("🤍 Душевный", callback_data="tone_soul")],
-        [InlineKeyboardButton("📱 Для сторис", callback_data="tone_stories")],
-        [InlineKeyboardButton("😈 С юмором", callback_data="tone_funny")]
+        [InlineKeyboardButton(text="🤍 Душевный", callback_data="tone_soul")],
+        [InlineKeyboardButton(text="📱 Для сторис", callback_data="tone_stories")],
+        [InlineKeyboardButton(text="😈 С юмором", callback_data="tone_funny")]
     ])
     await m.answer("Выбери тон:", reply_markup=kb)
+    logging.info(f"✅ [get_facts] Кнопки отправлены {m.from_user.id}")
     await state.set_state(CongratsFSM.tone)
 
 @dp.callback_query(CongratsFSM.tone)
@@ -128,26 +132,29 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     tone_map = {"tone_soul": "душевный", "tone_stories": "короткий для соцсетей", "tone_funny": "лёгкий, с юмором"}
     await state.update_data(tone=tone_map[cb.data])
     await cb.answer()
-
+    
     uid = cb.from_user.id
     user = get_user(uid)
+    
     if not user["premium_until"] and user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton("💳 Подписка 49₽/нед", url=PAYMENT_URL)],
             [InlineKeyboardButton("🔄 Перегенерировать", callback_data="regen")]
         ])
-        await cb.message.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит + озвучка + приоритет")
+        await cb.message.answer("🎁 Бесплатная попытка использована.\n🔓 Подписка: безлимит + озвучка + приоритет")
         await state.clear()
         return
-
+    
     await cb.message.answer("⏳ Генерирую...")
     data = await state.get_data()
+    
     try:
         text = await call_groq(data["name"], data["occasion"], data["holiday_type"], data["facts"], data["tone"])
         if not user["premium_until"]:
             set_used(uid)
-
+        
         await cb.message.answer(f"✅ Готово! Текст ниже — просто скопируй и отправь 👇\n\n{text}")
+        
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton("📋 Скопировать", callback_data="copy")],
@@ -155,9 +162,11 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton("💳 Подписка 49₽/нед", url=PAYMENT_URL)]
         ])
         await cb.message.answer("💡 Зажми сообщение с текстом → «Копировать»", reply_markup=kb)
+        
     except Exception as e:
-        logging.error(f"Ошибка: {e}")
-        await cb.message.answer("❌ Ошибка генерации. Попробуй через минуту.")
+        logging.error(f"❌ Ошибка генерации: {e}", exc_info=True)
+        await cb.message.answer("❌ Ошибка. Попробуй через минуту.")
+    
     await state.clear()
 
 @dp.callback_query(F.data == "copy")
@@ -178,10 +187,13 @@ async def regen(cb: types.CallbackQuery, state: FSMContext):
 async def call_groq(name, occasion, holiday_type, facts, tone):
     prompt = PROMPT.format(name=name, occasion=occasion, holiday_type=holiday_type, facts=facts, tone=tone)
     cache_key = hashlib.md5(f"{name}{occasion}{holiday_type}{facts}{tone}".encode()).hexdigest()
+    
     if not hasattr(call_groq, "cache"): call_groq.cache = {}
     if cache_key in call_groq.cache:
         return call_groq.cache[cache_key]
-
+    
+    logging.info(f"🔗 Запрос к Groq: {name} / {occasion}")
+    
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -199,7 +211,9 @@ async def call_groq(name, occasion, holiday_type, facts, tone):
         )
         response.raise_for_status()
         result = response.json()["choices"][0]["message"]["content"].strip()
+    
     call_groq.cache[cache_key] = result
+    logging.info(f"✅ Ответ от Groq получен")
     return result
 
 async def main():
