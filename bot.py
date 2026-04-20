@@ -138,7 +138,7 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     
     if not user["premium_until"] and user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("💳 Подписка 49₽/нед", url=PAYMENT_URL)],
+            [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)],
             [InlineKeyboardButton("🔄 Перегенерировать", callback_data="regen")]
         ])
         await cb.message.answer("🎁 Бесплатная попытка использована.\n🔓 Подписка: безлимит + озвучка + приоритет")
@@ -157,9 +157,9 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
         
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("📋 Скопировать", callback_data="copy")],
-            [InlineKeyboardButton("🤖 Сделать так же", url=share_url)],
-            [InlineKeyboardButton("💳 Подписка 49₽/нед", url=PAYMENT_URL)]
+            [InlineKeyboardButton(text="📋 Скопировать", callback_data="copy")],
+            [InlineKeyboardButton(text="🤖 Сделать так же", url=share_url)],
+            [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)]
         ])
         await cb.message.answer("💡 Зажми сообщение с текстом → «Копировать»", reply_markup=kb)
         
