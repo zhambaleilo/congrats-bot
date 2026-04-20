@@ -144,7 +144,7 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     if not user["premium_until"] and user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)],
-            [InlineKeyboardButton("🔄 Перегенерировать", callback_data="regen")]
+            [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen")]
         ])
         await cb.message.answer("🎁 Бесплатная попытка использована.\n🔓 Подписка: безлимит + озвучка + приоритет")
         await state.clear()
@@ -182,9 +182,9 @@ async def copy_hint(cb: types.CallbackQuery):
 async def regen(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("🤍 Душевный", callback_data="tone_soul")],
-        [InlineKeyboardButton("📱 Для сторис", callback_data="tone_stories")],
-        [InlineKeyboardButton("😈 С юмором", callback_data="tone_funny")]
+        [InlineKeyboardButton(text="🤍 Душевный", callback_data="tone_soul")],
+        [InlineKeyboardButton(text="📱 Для сторис", callback_data="tone_stories")],
+        [InlineKeyboardButton(text="😈 С юмором", callback_data="tone_funny")]
     ])
     await cb.message.answer("Выбери тон:", reply_markup=kb)
     await state.set_state(CongratsFSM.tone)
