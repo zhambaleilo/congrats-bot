@@ -164,8 +164,8 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
 
         # ✅ Ответ с текстом
         await cb.message.answer(
-            text=f"✅ Готово! Текст ниже — просто скопируй и отправь 👇\n\n{text}",
-            parse_mode="HTML"
+                text=text,  # Только текст от Groq, без "Готово!" и т.д.
+    parse_mode="HTML"
         )
 
         # ✅ Кнопки под текстом
@@ -173,12 +173,12 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать", callback_data="copy")],
             [InlineKeyboardButton(text="🤖 Сделать так же", url=share_url)],
-            [InlineKeyboardButton(text="💳 Подписка 69₽/нед", url=PAYMENT_URL)]
+            [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)]
         ])
         await cb.message.answer(
-            text="💡 Зажми сообщение с текстом → «Копировать»",
+            text="💡 Зажми сообщение **выше** с текстом → «Копировать»",
             reply_markup=kb,
-            parse_mode="HTML"
+            parse_mode="Markdown"
         )
     except Exception as e:
         logging.error(f"❌ Ошибка генерации: {e}", exc_info=True)
