@@ -144,12 +144,13 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     # Блок лимитов
     if not user["premium_until"] and user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)],
+            [InlineKeyboardButton(text="💳 Подписка 69₽/нед", url=PAYMENT_URL)],
             [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen")]
         ])
         await cb.message.answer(
             text="🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит + озвучка + приоритет",
-            parse_mode="HTML"  # ✅ Исправляет теги
+            parse_mode="HTML",  # ✅ Исправляет теги
+                reply_markup=kb  # ✅ Добавили клавиатуру
         )
         await state.clear()
         return
@@ -172,7 +173,7 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать", callback_data="copy")],
             [InlineKeyboardButton(text="🤖 Сделать так же", url=share_url)],
-            [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)]
+            [InlineKeyboardButton(text="💳 Подписка 69₽/нед", url=PAYMENT_URL)]
         ])
         await cb.message.answer(
             text="💡 Зажми сообщение с текстом → «Копировать»",
