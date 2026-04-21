@@ -137,43 +137,54 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     tone_map = {"tone_soul": "душевный", "tone_stories": "короткий для соцсетей", "tone_funny": "лёгкий, с юмором"}
     await state.update_data(tone=tone_map[cb.data])
     await cb.answer()
-    
+
     uid = cb.from_user.id
     user = get_user(uid)
-    
+
+    # Блок лимитов
     if not user["premium_until"] and user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)],
             [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen")]
         ])
-        await cb.message.answer("🎁 Бесплатная попытка использована.\n🔓 Подписка: безлимит + озвучка + приоритет")
+        await cb.message.answer(
+            text="🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит + озвучка + приоритет",
+            parse_mode="HTML"  # ✅ Исправляет теги
+        )
         await state.clear()
         return
-    
-    await cb.message.answer("⏳ Генерирую...")
+
+    await cb.message.answer(text="⏳ Генерирую...", parse_mode="HTML")
     data = await state.get_data()
-    
     try:
         text = await call_groq(data["name"], data["occasion"], data["holiday_type"], data["facts"], data["tone"])
         if not user["premium_until"]:
             set_used(uid)
-        
-        await cb.message.answer(f"✅ Готово! Текст ниже — просто скопируй и отправь 👇\n\n{text}")
-        
+
+        # ✅ Ответ с текстом
+        await cb.message.answer(
+            text=f"✅ Готово! Текст ниже — просто скопируй и отправь 👇\n\n{text}",
+            parse_mode="HTML"
+        )
+
+        # ✅ Кнопки под текстом
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать", callback_data="copy")],
             [InlineKeyboardButton(text="🤖 Сделать так же", url=share_url)],
             [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)]
         ])
-        await cb.message.answer("💡 Зажми сообщение с текстом → «Копировать»", reply_markup=kb)
-        
+        await cb.message.answer(
+            text="💡 Зажми сообщение с текстом → «Копировать»",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
     except Exception as e:
         logging.error(f"❌ Ошибка генерации: {e}", exc_info=True)
-        await cb.message.answer("❌ Ошибка. Попробуй через минуту.")
+        await cb.message.answer(text="❌ Ошибка. Попробуй через минуту.", parse_mode="HTML")
     
     await state.clear()
-
+    
 @dp.callback_query(F.data == "copy")
 async def copy_hint(cb: types.CallbackQuery):
     await cb.answer("📋 Зажми сообщение с текстом → «Копировать»", show_alert=True)
