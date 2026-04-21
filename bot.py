@@ -173,12 +173,10 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать", callback_data="copy")],
             [InlineKeyboardButton(text="🤖 Сделать так же", url=share_url)],
-            [InlineKeyboardButton(text="💳 Подписка 49₽/нед", url=PAYMENT_URL)]
+            [InlineKeyboardButton(text="💳 Подписка 69₽/нед", url=PAYMENT_URL)]
         ])
         await cb.message.answer(
-            text="💡 Зажми сообщение **выше** с текстом → «Копировать»",
-            reply_markup=kb,
-            parse_mode="Markdown"
+            await cb.message.answer(text="👇 Действия:", reply_markup=kb)
         )
     except Exception as e:
         logging.error(f"❌ Ошибка генерации: {e}", exc_info=True)
@@ -188,7 +186,7 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     
 @dp.callback_query(F.data == "copy")
 async def copy_hint(cb: types.CallbackQuery):
-    await cb.answer("📋 Зажми сообщение с текстом → «Копировать»", show_alert=True)
+        await cb.answer("💡 Долгое нажатие на текст выше → Копировать", show_alert=False)
 
 @dp.callback_query(F.data == "regen")
 async def regen(cb: types.CallbackQuery, state: FSMContext):
