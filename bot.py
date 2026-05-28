@@ -4,42 +4,45 @@ import hashlib
 import httpx
 import logging
 import sqlite3
+import time
+from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 
-# Загрузка переменных
+# ========== КОНФИГ ==========
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "CongratsTurnBot")
 PAYMENT_URL = os.getenv("PAYMENT_URL", "#")
+ADMIN_ID = 5174945583  # Ваш ID
 
-# Логирование
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-# ---------- База данных ----------
 DB_PATH = "congrats.db"
 
+# ========== БАЗА ДАННЫХ ==========
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         free_used INTEGER DEFAULT 0,
-        premium_until TEXT
+        premium_until TEXT,
+        is_admin INTEGER DEFAULT 0
     )""")
+    conn.execute("INSERT OR IGNORE INTO users (user_id, is_admin) VALUES (?, 1)", (ADMIN_ID,))
     conn.commit()
     conn.close()
 
 def get_user(uid):
     conn = sqlite3.connect(DB_PATH)
-    cur = conn.execute("SELECT free_used, premium_until FROM users WHERE user_id=?", (uid,))
+    cur = conn.execute("SELECT free_used, premium_until, is_admin FROM users WHERE user_id=?", (uid,))
     res = cur.fetchone()
     conn.close()
     if not res:
@@ -47,8 +50,8 @@ def get_user(uid):
         conn.execute("INSERT INTO users (user_id) VALUES (?)", (uid,))
         conn.commit()
         conn.close()
-        return {"free_used": 0, "premium_until": None}
-    return {"free_used": res[0], "premium_until": res[1]}
+        return {"free_used": 0, "premium_until": None, "is_admin": 0}
+    return {"free_used": res[0], "premium_until": res[1], "is_admin": res[2]}
 
 def set_used(uid):
     conn = sqlite3.connect(DB_PATH)
@@ -56,14 +59,24 @@ def set_used(uid):
     conn.commit()
     conn.close()
 
-# ---------- Авто-определение типа праздника ----------
+def grant_premium(uid, days=30):
+    until = int(time.time()) + (days * 86400)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE users SET premium_until=? WHERE user_id=?", (until, uid))
+    conn.commit()
+    conn.close()
+    return until
+
+# ========== ОПРЕДЕЛЕНИЕ ТИПА ПРАЗДНИКА ==========
 HOLIDAY_MAP = {
-    "пасха": "православный", "рождество": "православный", "крещение": "православный",
-    "благовещение": "православный", "петр и феврония": "православный",
+    "пасха": "религиозный", "рождество": "религиозный", "крещение": "религиозный",
+    "благовещение": "религиозный", "петр и феврония": "религиозный",
+    "курбан байрам": "религиозный", "рамадан": "религиозный", "ураза байрам": "религиозный",
+    "сагаалган": "религиозный", "белый месяц": "религиозный", "цагаалган": "религиозный",
     "новый год": "светский", "23 февраля": "светский", "8 марта": "светский",
     "9 мая": "светский", "день смеха": "светский", "день учителя": "светский",
-    "день рождения": "личный", "годовщина": "личный", "свадьба": "личный",
-    "корпоратив": "корпоративный", "юбилей компании": "корпоративный"
+    "день рождения": "личный", "годовщина": "личный", "свадьба": "личный", "рождение ребенка": "личный",
+    "корпоратив": "корпоративный", "юбилей компании": "корпоративный", "дембель": "корпоративный"
 }
 
 def detect_type(text):
@@ -73,7 +86,7 @@ def detect_type(text):
             return val
     return "светский"
 
-# ---------- Промпт ----------
+# ========== ПРОМПТ ==========
 PROMPT = """Ты — профессиональный копирайтер с 10-летним опытом. Сгенерируй тёплое, искреннее поздравление по данным:
 ИМЯ: {name}
 ПОВОД: {occasion}
@@ -81,23 +94,24 @@ PROMPT = """Ты — профессиональный копирайтер с 10
 ФАКТЫ: {facts}
 ТОН: {tone}
 ПРАВИЛА:
-Если тип="православный": тон уважительный, традиционный. Используй "Христос Воскресе", "светлого праздника". Без юмора.
+Если тип="религиозный": тон уважительный, традиционный. Используй уместные фразы: "Христос Воскресе", "светлого праздника", "Рамадан Мубарак", "Сагаан hараар". Без юмора.
 Если тип="корпоративный": профессионально, с уважением, без панибратства.
 Если тон="с юмором": лёгкий, добрый юмор. Без сарказма и обидных шуток.
 Обязательно органично вплетай минимум 1 факт из {facts}.
 Избегай клише: "счастья, здоровья, успехов, долгих лет, исполнения желаний, благополучия".
-Используй живой, разговорный язык. Обращайся на "ты" (если не корпоративный).
+Используй живой, разговорный язык. Обращайся на "ты" (если не корпоративный и не старший человек).
 Максимум 3-4 предложения. Без воды.
 Правильные падежи и согласования.
 Верни ТОЛЬКО текст поздравления. Без вступлений, пояснений и подписей."""
 
-# ---------- FSM ----------
+# ========== FSM ==========
 class CongratsFSM(StatesGroup):
     name = State()
     occasion = State()
     facts = State()
     tone = State()
 
+# ========== ХЕНДЛЕРЫ ПОЛЬЗОВАТЕЛЯ ==========
 @dp.message(CommandStart())
 async def cmd_start(m: types.Message, state: FSMContext):
     await state.clear()
@@ -108,7 +122,7 @@ async def cmd_start(m: types.Message, state: FSMContext):
 @dp.message(CongratsFSM.name)
 async def get_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text.strip())
-    await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, корпоратив...)?", parse_mode="HTML")
+    await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, Белый месяц, Рамадан, корпоратив, дембель...)?", parse_mode="HTML")
     await state.set_state(CongratsFSM.occasion)
 
 @dp.message(CongratsFSM.occasion)
@@ -120,7 +134,6 @@ async def get_occasion(m: types.Message, state: FSMContext):
 
 @dp.message(CongratsFSM.facts)
 async def get_facts(m: types.Message, state: FSMContext):
-    logging.info(f"📝 [get_facts] Получено от {m.from_user.id}: {m.text}")
     await state.update_data(facts=m.text.strip())
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤍 Душевный", callback_data="tone_soul")],
@@ -128,7 +141,6 @@ async def get_facts(m: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="😈 С юмором", callback_data="tone_funny")]
     ])
     await m.answer("Выбери тон:", reply_markup=kb, parse_mode="HTML")
-    logging.info(f"✅ [get_facts] Кнопки отправлены {m.from_user.id}")
     await state.set_state(CongratsFSM.tone)
 
 @dp.callback_query(CongratsFSM.tone)
@@ -139,42 +151,48 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     user = get_user(uid)
 
-    # Блок лимитов
-    if not user["premium_until"] and user["free_used"]:
+    # Проверка доступа
+    if user["is_admin"] or (user["premium_until"] and user["premium_until"] != "None"):
+        await generate_congrats(cb, state, uid)
+        return
+
+    if user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Подписка 69₽/нед", url=PAYMENT_URL)],
+            [InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)],
             [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen")]
         ])
         await cb.message.answer(
-            text="🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит + озвучка + приоритет",
+            text="🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимитные генерации",
             parse_mode="HTML",
             reply_markup=kb
         )
         await state.clear()
         return
 
+    await generate_congrats(cb, state, uid)
+
+async def generate_congrats(cb, state, uid):
     await cb.message.answer(text="⏳ Генерирую...", parse_mode="HTML")
     data = await state.get_data()
+    user = get_user(uid)
+    
     try:
         text = await call_groq(data["name"], data["occasion"], data["holiday_type"], data["facts"], data["tone"])
-        if not user["premium_until"]:
+        if not user["is_admin"] and not (user["premium_until"] and user["premium_until"] != "None"):
             set_used(uid)
 
-        # Ответ с текстом
         await cb.message.answer(text=text, parse_mode="HTML")
 
-        # Кнопки под текстом
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать", callback_data="copy")],
             [InlineKeyboardButton(text="🤖 Сделать так же", url=share_url)],
-            [InlineKeyboardButton(text="💳 Подписка 69₽/нед", url=PAYMENT_URL)]
+            [InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)]
         ])
         await cb.message.answer("👇 Действия:", reply_markup=kb)
     except Exception as e:
         logging.error(f"❌ Ошибка генерации: {e}", exc_info=True)
         await cb.message.answer(text="❌ Ошибка. Попробуй через минуту.", parse_mode="HTML")
-
     await state.clear()
 
 @dp.callback_query(F.data == "copy")
@@ -192,9 +210,71 @@ async def regen(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.answer("Выбери тон:", reply_markup=kb)
     await state.set_state(CongratsFSM.tone)
 
+# ========== АДМИН-ПАНЕЛЬ ==========
+@dp.message(Command("admin"))
+async def cmd_admin(m: types.Message):
+    if m.from_user.id != ADMIN_ID:
+        return await m.answer("🚫 Доступ запрещён")
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")],
+        [InlineKeyboardButton(text="💎 Выдать премиум", callback_data="admin_grant")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")]
+    ])
+    await m.answer("🛡 <b>Админ-панель</b>\n\nВыберите действие:", reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "admin_users")
+async def admin_users(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return await cb.answer("🚫", show_alert=True)
+    
+    conn = sqlite3.connect(DB_PATH)
+    users = conn.execute("SELECT user_id, free_used, premium_until FROM users").fetchall()
+    conn.close()
+    
+    text = "👥 <b>Пользователи:</b>\n\n"
+    for u in users:
+        status = "💎 Премиум" if u[2] and u[2] != "None" else ("🆓 Бесплатно" if not u[1] else "❌ Лимит")
+        text += f"<code>{u[0]}</code> — {status}\n"
+    
+    await cb.message.answer(text, parse_mode="HTML")
+
+@dp.callback_query(F.data == "admin_grant")
+async def admin_grant(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return await cb.answer("🚫", show_alert=True)
+    await cb.message.answer("✍️ Введите ID пользователя для выдачи премиума:")
+    await cb.message.set_state("admin_waiting_grant")
+
+@dp.message(StateFilter("admin_waiting_grant"))
+async def process_grant(m: types.Message):
+    if m.from_user.id != ADMIN_ID:
+        return
+    try:
+        target_id = int(m.text.strip())
+        until = grant_premium(target_id, 30)
+        await m.answer(f"✅ Пользователю {target_id} выдан премиум до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}")
+    except ValueError:
+        await m.answer("❌ Введите корректный числовой ID")
+    await m.set_state(None)
+
+@dp.callback_query(F.data == "admin_stats")
+async def admin_stats(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return await cb.answer("🚫", show_alert=True)
+    
+    conn = sqlite3.connect(DB_PATH)
+    total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    premium = conn.execute("SELECT COUNT(*) FROM users WHERE premium_until IS NOT NULL AND premium_until != 'None'").fetchone()[0]
+    conn.close()
+    
+    await cb.message.answer(f"📊 <b>Статистика:</b>\n\nВсего пользователей: {total}\nПремиум: {premium}", parse_mode="HTML")
+
+# ========== GROQ API ==========
 async def call_groq(name, occasion, holiday_type, facts, tone):
     prompt = PROMPT.format(name=name, occasion=occasion, holiday_type=holiday_type, facts=facts, tone=tone)
     cache_key = hashlib.md5(f"{name}{occasion}{holiday_type}{facts}{tone}".encode()).hexdigest()
+    
     if not hasattr(call_groq, "cache"):
         call_groq.cache = {}
     if cache_key in call_groq.cache:
@@ -224,6 +304,7 @@ async def call_groq(name, occasion, holiday_type, facts, tone):
     logging.info("✅ Ответ от Groq получен")
     return result
 
+# ========== ЗАПУСК ==========
 async def main():
     init_db()
     logging.info("✅ Бот запущен. Ожидает сообщения...")
