@@ -20,7 +20,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "CongratsTurnBot")
 PAYMENT_URL = os.getenv("PAYMENT_URL", "#")
-ADMIN_ID = 5174945583  # Ваш ID
+ADMIN_ID = 5174945583
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 bot = Bot(token=BOT_TOKEN)
@@ -69,13 +69,22 @@ def grant_premium(uid, days=30):
 
 # ========== ОПРЕДЕЛЕНИЕ ТИПА ПРАЗДНИКА ==========
 HOLIDAY_MAP = {
-    "пасха": "религиозный", "рождество": "религиозный", "крещение": "религиозный",
-    "благовещение": "религиозный", "петр и феврония": "религиозный",
-    "курбан байрам": "религиозный", "рамадан": "религиозный", "ураза байрам": "религиозный",
-    "сагаалган": "религиозный", "белый месяц": "религиозный", "цагаалган": "религиозный",
+    # Православные
+    "пасха": "православный", "рождество": "православный", "крещение": "православный",
+    "благовещение": "православный", "петр и феврония": "православный", "троица": "православный",
+    # Мусульманские
+    "курбан байрам": "мусульманский", "рамадан": "мусульманский", "ураза байрам": "мусульманский",
+    "ид аль-фитр": "мусульманский", "ид аль-адха": "мусульманский",
+    # Буддийские
+    "сагаалган": "буддийский", "белый месяц": "буддийский", "цагаалган": "буддийский",
+    "сагаан hараар": "буддийский", "саган хара": "буддийский",
+    # Светские
     "новый год": "светский", "23 февраля": "светский", "8 марта": "светский",
     "9 мая": "светский", "день смеха": "светский", "день учителя": "светский",
-    "день рождения": "личный", "годовщина": "личный", "свадьба": "личный", "рождение ребенка": "личный",
+    # Личные
+    "день рождения": "личный", "годовщина": "личный", "свадьба": "личный", 
+    "рождение ребенка": "личный", "крестины": "личный",
+    # Корпоративные
     "корпоратив": "корпоративный", "юбилей компании": "корпоративный", "дембель": "корпоративный"
 }
 
@@ -93,8 +102,14 @@ PROMPT = """Ты — профессиональный копирайтер с 10
 ТИП: {holiday_type}
 ФАКТЫ: {facts}
 ТОН: {tone}
-ПРАВИЛА:
-Если тип="религиозный": тон уважительный, традиционный. Используй уместные фразы: "Христос Воскресе", "светлого праздника", "Рамадан Мубарак", "Сагаан hараар". Без юмора.
+
+ПРАВИЛА ПО РЕЛИГИЯМ:
+- Если тип="православный": используй ТОЛЬКО православные фразы: "Христос Воскресе", "светлого праздника", "Божией милостью", "спаси Господи". Без юмора.
+- Если тип="мусульманский": используй ТОЛЬКО мусульманские фразы: "Рамадан Мубарак", "Ид Мубарак", "Аллаху Акбар", "да примет Аллах". Без юмора.
+- Если тип="буддийский": используй ТОЛЬКО буддийские фразы: "Сагаан hараар", "Бурхан багша", "благопожелания", "белые мысли". Без юмора.
+- НИКОГДА не смешивай религии! Для буддийского праздника не пиши "Христос Воскресе"!
+
+ОБЩИЕ ПРАВИЛА:
 Если тип="корпоративный": профессионально, с уважением, без панибратства.
 Если тон="с юмором": лёгкий, добрый юмор. Без сарказма и обидных шуток.
 Обязательно органично вплетай минимум 1 факт из {facts}.
@@ -122,14 +137,14 @@ async def cmd_start(m: types.Message, state: FSMContext):
 @dp.message(CongratsFSM.name)
 async def get_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text.strip())
-    await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, Белый месяц, Рамадан, корпоратив, дембель...)?", parse_mode="HTML")
+    await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, Сагаалган, Рамадан, корпоратив...)?", parse_mode="HTML")
     await state.set_state(CongratsFSM.occasion)
 
 @dp.message(CongratsFSM.occasion)
 async def get_occasion(m: types.Message, state: FSMContext):
     await state.update_data(occasion=m.text.strip())
     await state.update_data(holiday_type=detect_type(m.text.strip()))
-    await m.answer("🤫 <b>1-2 факта/детали.</b>\nПримеры: «вечно опаздывает», «любит рыбалку», «готовит лучшие блины»", parse_mode="HTML")
+    await m.answer("🤫 <b>1-2 факта/детали.</b>\nПримеры: «вечно опаздывает», «любит рыбалку», «готовит лучшие бузы»", parse_mode="HTML")
     await state.set_state(CongratsFSM.facts)
 
 @dp.message(CongratsFSM.facts)
@@ -151,7 +166,6 @@ async def process_tone(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     user = get_user(uid)
 
-    # Проверка доступа
     if user["is_admin"] or (user["premium_until"] and user["premium_until"] != "None"):
         await generate_congrats(cb, state, uid)
         return
@@ -181,12 +195,13 @@ async def generate_congrats(cb, state, uid):
         if not user["is_admin"] and not (user["premium_until"] and user["premium_until"] != "None"):
             set_used(uid)
 
-        await cb.message.answer(text=text, parse_mode="HTML")
+        # ✅ ИСПРАВЛЕНО: Отправляем текст с возможностью копирования
+        await cb.message.answer(text, parse_mode="HTML")
 
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Скопировать", callback_data="copy")],
-            [InlineKeyboardButton(text="🤖 Сделать так же", url=share_url)],
+            [InlineKeyboardButton(text="📋 Скопировать текст", callback_data="copy")],
+            [InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)],
             [InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)]
         ])
         await cb.message.answer("👇 Действия:", reply_markup=kb)
@@ -197,7 +212,7 @@ async def generate_congrats(cb, state, uid):
 
 @dp.callback_query(F.data == "copy")
 async def copy_hint(cb: types.CallbackQuery):
-    await cb.answer("💡 Долгое нажатие на текст выше → Копировать", show_alert=False)
+    await cb.answer("💡 На ПК: выделите текст и нажмите Ctrl+C\n📱 На телефоне: долгое нажатие → Копировать", show_alert=True)
 
 @dp.callback_query(F.data == "regen")
 async def regen(cb: types.CallbackQuery, state: FSMContext):
