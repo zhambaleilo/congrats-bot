@@ -527,7 +527,7 @@ async def main():
     # ✅ П.6: Настраиваем Menu Button (кнопка меню слева от поля ввода)
     await bot.set_chat_menu_button(
         menu_button=MenuButton(
-            type=MenuButtonType.COMMAND,
+            type=MenuButtonType.COMMANDS,
             command="new"  # При нажатии вызовет /new
         )
     )
