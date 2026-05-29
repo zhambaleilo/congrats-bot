@@ -5,7 +5,6 @@ import httpx
 import logging
 import sqlite3
 import time
-import traceback
 from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart, StateFilter
@@ -101,7 +100,7 @@ def detect_type(text):
             return val
     return "светский"
 
-# ========== ПРОМПТ (УЛУЧШЕННЫЙ ДЛЯ СТИХОВ) ==========
+# ========== ПРОМПТ (УЛУЧШЕННЫЙ) ==========
 PROMPT = """Ты — профессиональный поэт и копирайтер. Сгенерируй поздравление:
 
 ДАННЫЕ:
@@ -110,15 +109,12 @@ PROMPT = """Ты — профессиональный поэт и копирай
 ТИП: {holiday_type}
 ФАКТЫ: {facts}
 СТИЛЬ: {style}
-ФОРМАТ: {format}
 
-КРИТИЧЕСКИ ВАЖНО ДЛЯ СТИХОВ:
-- Если формат="стихи", создай НАСТОЯЩЕЕ рифмованное стихотворение!
-- Используй ТОЛЬКО парную (ААББ) или перекрёстную (АБАБ) рифмовку
-- Соблюдай ритм: 4-8 строк с одинаковым размером
-- Каждая строка должна рифмоваться! ПРОВЕРЬ рифму перед выводом
-- Пример хорошей рифмы: "снова-слова", "ярко-жарко", "царствуешь-властвуешь"
-- НЕ пиши просто текст с переносами строк — это должны быть СТИХИ!
+КРИТИЧЕСКИ ВАЖНО:
+- Если стиль="стихи": создай НАСТОЯЩЕЕ рифмованное стихотворение с чёткой рифмой (ААББ или АБАБ), 4-8 строк
+- Если стиль="душевный": тёплый, эмоциональный, от сердца
+- Если стиль="смешной": добрый юмор, шутки
+- Если стиль="официальный": деловой, уважительный
 
 ПРАВИЛА ПО РЕЛИГИЯМ:
 - Если тип="православный": ТОЛЬКО "Христос Воскресе", "светлого праздника". Без юмора.
@@ -126,34 +122,18 @@ PROMPT = """Ты — профессиональный поэт и копирай
 - Если тип="буддийский": ТОЛЬКО "Сагаан hараар", "Бурхан багша". Без юмора.
 - НЕ СМЕШИВАЙ РЕЛИГИИ!
 
-СТИЛИ:
-- "душевный": тёплый, эмоциональный, от сердца
-- "смешной": добрый юмор, шутки, игра слов
-- "официальный": деловой, уважительный
-- "креативный": с метафорами, оригинальными сравнениями
-
-ФОРМАТЫ:
-- "проза": 3-4 предложения, обычный текст
-- "стихи": РИФМОВАННОЕ, 4-8 строк, с чёткой рифмой и ритмом
-- "соцсети": коротко, с эмодзи ✨ и хештегами
-
-ОБРАБОТКА ЗНАМЕНИТОСТЕЙ:
-- Если имя известное (Киркоров, Бузова и т.д.), добавь 1 упоминание их профессии
-- Используй торжественный тон для знаменитостей
-
 ОБЩИЕ ПРАВИЛА:
 1. Обязательно вплетай факты из {facts}
 2. Избегай клише: "счастья, здоровья, успехов"
 3. Для стихов ПРОВЕРЬ рифму!
 4. Верни ТОЛЬКО готовый текст. Без пояснений."""
 
-# ========== FSM ==========
+# ========== FSM (УПРОЩЁННЫЙ - БЕЗ ФОРМАТА) ==========
 class CongratsFSM(StatesGroup):
     name = State()
     occasion = State()
     facts = State()
     style = State()
-    format = State()
 
 # ========== ХЕНДЛЕРЫ ==========
 @dp.message(CommandStart())
@@ -199,20 +179,7 @@ async def process_style(cb: types.CallbackQuery, state: FSMContext):
     style_map = {"style_soul": "душевный", "style_funny": "смешной", "style_formal": "официальный", "style_creative": "креативный"}
     await state.update_data(style=style_map[cb.data])
     await cb.answer()
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Проза", callback_data="format_prose"),
-         InlineKeyboardButton(text="🌸 В стихах", callback_data="format_poem")],
-        [InlineKeyboardButton(text="📱 Для соцсетей", callback_data="format_social")],
-        [InlineKeyboardButton(text="⏭ Пропустить (проза)", callback_data="format_skip")]
-    ])
-    await cb.message.edit_text("📐 <b>Выбери формат:</b>", reply_markup=kb, parse_mode="HTML")
-    await state.set_state(CongratsFSM.format)
-
-@dp.callback_query(CongratsFSM.format)
-async def process_format(cb: types.CallbackQuery, state: FSMContext):
-    format_map = {"format_prose": "проза", "format_poem": "стихи", "format_social": "соцсети", "format_skip": "проза"}
-    await state.update_data(format=format_map[cb.data])
-    await cb.answer()
+    
     uid = cb.from_user.id
     user = get_user(uid)
     
@@ -226,7 +193,7 @@ async def process_format(cb: types.CallbackQuery, state: FSMContext):
     if user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)],
-            [InlineKeyboardButton(text="🔄 Другой стиль", callback_data="regen_style")]
+            [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen_style")]
         ])
         await cb.message.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит", reply_markup=kb)
         await state.clear()
@@ -240,7 +207,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
     user = get_user(uid)
     
     try:
-        text = await call_groq(data["name"], data["occasion"], data["holiday_type"], data["facts"], data["style"], data["format"])
+        text = await call_groq(data["name"], data["occasion"], data["holiday_type"], data["facts"], data["style"])
         
         if not user["is_admin"] and not is_premium_active(user):
             set_used(uid)
@@ -255,7 +222,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
             [InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]
         ]
         
-        # ✅ Показываем оплату только НЕ премиум пользователям
+        # Показываем оплату только НЕ премиум пользователям
         if not user["is_admin"] and not is_premium_active(user):
             buttons.append([InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)])
         
@@ -263,7 +230,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         buttons.append([InlineKeyboardButton(text="🆕 Новое поздравление", callback_data="new_congrats")])
         
         kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-        await cb.message.answer("👇 Действия:", reply_markup=kb)  # ✅ Убран двойной await
+        await cb.message.answer("👇 Действия:", reply_markup=kb)
         
     except httpx.HTTPStatusError as e:
         logging.exception(f"❌ Groq HTTP {e.response.status_code}: {e.response.text}")
@@ -278,7 +245,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         logging.exception("❌ Timeout Groq")
         await cb.message.answer("🐢 Нейросеть думает. Попробуй позже.")
     except Exception as e:
-        logging.exception(f"❌ Unhandled: {e}\n{traceback.format_exc()}")
+        logging.exception(f"❌ Unhandled: {e}")
         await cb.message.answer("❌ Ошибка. Админ уведомлён.")
     
     await state.clear()
@@ -419,9 +386,9 @@ async def admin_stats(cb: types.CallbackQuery):
     await cb.message.answer(f"📊 <b>Статистика:</b>\n\nВсего: {total}\nПремиум: {premium}\nЗаблокировано: {blocked}", parse_mode="HTML")
 
 # ========== GROQ API ==========
-async def call_groq(name, occasion, holiday_type, facts, style, format):
-    prompt = PROMPT.format(name=name, occasion=occasion, holiday_type=holiday_type, facts=facts, style=style, format=format)
-    cache_key = hashlib.md5(f"{name}{occasion}{holiday_type}{facts}{style}{format}".encode()).hexdigest()
+async def call_groq(name, occasion, holiday_type, facts, style):
+    prompt = PROMPT.format(name=name, occasion=occasion, holiday_type=holiday_type, facts=facts, style=style)
+    cache_key = hashlib.md5(f"{name}{occasion}{holiday_type}{facts}{style}".encode()).hexdigest()
     if not hasattr(call_groq, "cache"):
         call_groq.cache = {}
     if cache_key in call_groq.cache:
