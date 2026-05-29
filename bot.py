@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
 from dotenv import load_dotenv
 
 # ========== КОНФИГ ==========
@@ -218,7 +218,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         # Формируем кнопки
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         buttons = [
-            [InlineKeyboardButton(text="📋 Скопировать", copy_text=text)],
+            InlineKeyboardButton(text="📋 Скопировать", copy_text=types.CopyTextButton(text=text))
             [InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]
         ]
         
