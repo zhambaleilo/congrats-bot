@@ -5,6 +5,7 @@ import httpx
 import logging
 import sqlite3
 import time
+import re
 from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart, StateFilter
@@ -100,30 +101,49 @@ def detect_type(text):
             return val
     return "светский"
 
-# ========== ПРОМПТ ==========
-PROMPT = """Ты — профессиональный копирайтер с 10-летним опытом. Сгенерируй поздравление:
+# ========== ПРОМПТ (УЛУЧШЕННЫЙ) ==========
+PROMPT = """Ты — профессиональный копирайтер и поэт. Сгенерируй поздравление:
+
+ДАННЫЕ:
 ИМЯ: {name}
 ПОВОД: {occasion}
-ТИП: {holiday_type}
-ФАКТЫ: {facts}
+ТИП ПРАЗДНИКА: {holiday_type}
+ФАКТЫ О ЧЕЛОВЕКЕ: {facts}
 СТИЛЬ: {style}
 ФОРМАТ: {format}
 
-ПРАВИЛА:
-- Если тип="православный": используй "Христос Воскресе", "светлого праздника". Без юмора.
-- Если тип="мусульманский": используй "Рамадан Мубарак", "Ид Мубарак". Без юмора.
-- Если тип="буддийский": используй "Сагаан hараар", "Бурхан багша". Без юмора.
-- НЕ СМЕШИВАЙ РЕЛИГИИ!
-- Стиль "душевный": тёплый, эмоциональный
-- Стиль "смешной": добрый юмор, без сарказма
-- Стиль "официальный": деловой, уважительный
-- Стиль "креативный": с метафорами, оригинальный
-- Формат "проза": 3-4 предложения
-- Формат "стихи": рифмованное, 4-8 строк
-- Формат "соцсети": с эмодзи ✨ и хештегами
-- Вплетай факты из {facts}
-- Избегай клише
-- Верни ТОЛЬКО текст поздравления"""
+ВАЖНОЕ ПРАВИЛО ПО РЕЛИГИЯМ:
+- Если тип="православный": ТОЛЬКО православные фразы: "Христос Воскресе", "светлого праздника". Без юмора.
+- Если тип="мусульманский": ТОЛЬКО мусульманские фразы: "Рамадан Мубарак", "Ид Мубарак". Без юмора.
+- Если тип="буддийский": ТОЛЬКО буддийские фразы: "Сагаан hараар", "Бурхан багша". Без юмора.
+- НИКОГДА не смешивай религии!
+
+СТИЛИ:
+- "душевный": тёплый, эмоциональный, от сердца
+- "смешной": добрый юмор, шутки, игра слов (без сарказма!)
+- "официальный": деловой, уважительный, для старших/начальства
+- "креативный": с метафорами, оригинальными сравнениями, художественный
+
+ФОРМАТЫ (СТРОГО СОБЛЮДАЙ СТРУКТУРУ):
+- "проза": 3-4 предложения, обычный текст
+- "стихи": ОБЯЗАТЕЛЬНО рифмованное четверостишие или восьмистишие! 
+  * Используй перекрёстную рифму (АБАБ) или парную (ААББ)
+  * Соблюдай ритм (ямб или хорей)
+  * 4-8 строк
+  * Каждая строка должна рифмоваться с соседней
+  * Пример структуры: строка 1 рифмуется со строкой 3, строка 2 со строкой 4
+- "соцсети": коротко (2-3 предложения), с эмодзи ✨ и 2-3 хештегами
+
+ОБРАБОТКА ЗНАМЕНИТОСТЕЙ:
+- Если имя {name} соответствует известной личности (Ольга Бузова, Киркоров, Моргенштерн и т.д.), добавь 1 упоминание их деятельности (пение, шоу-бизнес, музыка)
+- Для знаменитостей используй более торжественный тон, но сохраняй искренность
+- НЕ выдумывай факты о знаменитостях, используй только общие фразы о их профессии
+
+ОБЩИЕ ПРАВИЛА:
+1. Обязательно органично вплетай минимум 1 факт из {facts}
+2. Избегай клише: "счастья, здоровья, успехов, долгих лет"
+3. Для формата "стихи" ПРОВЕРЬ рифму перед выводом!
+4. Верни ТОЛЬКО готовый текст. Без вступлений, пояснений, подписей."""
 
 # ========== FSM ==========
 class CongratsFSM(StatesGroup):
@@ -150,14 +170,14 @@ async def cmd_new(m: types.Message, state: FSMContext):
 @dp.message(CongratsFSM.name)
 async def get_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text.strip())
-    await m.answer("🎈 <b>Какой повод?</b>", parse_mode="HTML")
+    await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, Сагаалган, Рамадан, корпоратив...)?", parse_mode="HTML")
     await state.set_state(CongratsFSM.occasion)
 
 @dp.message(CongratsFSM.occasion)
 async def get_occasion(m: types.Message, state: FSMContext):
     await state.update_data(occasion=m.text.strip())
     await state.update_data(holiday_type=detect_type(m.text.strip()))
-    await m.answer("🤫 <b>1-2 факта/детали.</b>", parse_mode="HTML")
+    await m.answer(" <b>1-2 факта/детали.</b>\nПримеры: «вечно опаздывает», «любит рыбалку», «готовит лучшие блины»", parse_mode="HTML")
     await state.set_state(CongratsFSM.facts)
 
 @dp.message(CongratsFSM.facts)
@@ -165,7 +185,7 @@ async def get_facts(m: types.Message, state: FSMContext):
     await state.update_data(facts=m.text.strip())
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💖 Душевный", callback_data="style_soul"),
-         InlineKeyboardButton(text="😂 Смешной", callback_data="style_funny")],
+         InlineKeyboardButton(text=" Смешной", callback_data="style_funny")],
         [InlineKeyboardButton(text="🎩 Официальный", callback_data="style_formal"),
          InlineKeyboardButton(text="🔥 Креативный", callback_data="style_creative")]
     ])
@@ -181,9 +201,9 @@ async def process_style(cb: types.CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="📝 Проза", callback_data="format_prose"),
          InlineKeyboardButton(text="🌸 В стихах", callback_data="format_poem")],
         [InlineKeyboardButton(text="📱 Для соцсетей", callback_data="format_social")],
-        [InlineKeyboardButton(text="⏭ Пропустить", callback_data="format_skip")]
+        [InlineKeyboardButton(text="⏭ Пропустить (проза)", callback_data="format_skip")]
     ])
-    await cb.message.edit_text("📐 <b>Выбери формат:</b>", reply_markup=kb, parse_mode="HTML")
+    await cb.message.edit_text(" <b>Выбери формат:</b>", reply_markup=kb, parse_mode="HTML")
     await state.set_state(CongratsFSM.format)
 
 @dp.callback_query(CongratsFSM.format)
@@ -204,7 +224,7 @@ async def process_format(cb: types.CallbackQuery, state: FSMContext):
     if user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)],
-            [InlineKeyboardButton(text="🔄 Попробовать другой стиль", callback_data="regen_style")]
+            [InlineKeyboardButton(text="🔄 Другой стиль", callback_data="regen_style")]
         ])
         await cb.message.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит", reply_markup=kb)
         await state.clear()
@@ -223,24 +243,28 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         if not user["is_admin"] and not is_premium_active(user):
             set_used(uid)
 
-        await cb.message.answer(text)
+        # Отправляем текст поздравления
+        await cb.message.answer(text, parse_mode="HTML")
 
+        # Формируем кнопки
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         buttons = [
             [InlineKeyboardButton(text="📋 Скопировать", copy_text=text)],
             [InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]
         ]
         
+        # Показываем оплату только не-премиум пользователям
         if not user["is_admin"] and not is_premium_active(user):
-            buttons.append([InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)])
+            buttons.append([InlineKeyboardButton(text=" Подписка 200₽/мес", url=PAYMENT_URL)])
         
+        # Кнопка нового поздравления
         buttons.append([InlineKeyboardButton(text="🆕 Новое поздравление", callback_data="new_congrats")])
         
         kb = InlineKeyboardMarkup(inline_keyboard=buttons)
         await cb.message.answer("👇 Действия:", reply_markup=kb)
         
     except httpx.HTTPStatusError as e:
-        logging.exception(f"❌ Groq HTTP error {e.response.status_code}")
+        logging.exception(f"❌ Groq HTTP {e.response.status_code}: {e.response.text}")
         if e.response.status_code == 429:
             msg = "⏳ Лимит. Подожди 15 сек."
         elif e.response.status_code >= 500:
@@ -249,17 +273,13 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
             msg = "❌ Ошибка генерации."
         await cb.message.answer(msg)
     except asyncio.TimeoutError:
-        logging.exception("❌ Timeout")
+        logging.exception(" Timeout Groq")
         await cb.message.answer("🐢 Нейросеть думает. Попробуй позже.")
     except Exception as e:
-        logging.exception(f"❌ Unhandled error: {e}")
+        logging.exception(f"❌ Unhandled: {e}")
         await cb.message.answer("❌ Ошибка. Админ уведомлён.")
     
     await state.clear()
-
-@dp.callback_query(F.data == "copy")
-async def copy_hint(cb: types.CallbackQuery):
-    await cb.answer("✅ Текст скопирован!", show_alert=True)
 
 @dp.callback_query(F.data == "new_congrats")
 async def new_congrats(cb: types.CallbackQuery, state: FSMContext):
@@ -280,7 +300,7 @@ async def regen_style(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💖 Душевный", callback_data="style_soul"),
-         InlineKeyboardButton(text="😂 Смешной", callback_data="style_funny")],
+         InlineKeyboardButton(text=" Смешной", callback_data="style_funny")],
         [InlineKeyboardButton(text="🎩 Официальный", callback_data="style_formal"),
          InlineKeyboardButton(text="🔥 Креативный", callback_data="style_creative")]
     ])
@@ -296,7 +316,7 @@ async def cmd_admin(m: types.Message):
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")],
         [InlineKeyboardButton(text="💎 Выдать премиум", callback_data="admin_grant")],
         [InlineKeyboardButton(text="🚫 Заблокировать", callback_data="admin_block")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text=" Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")]
     ])
     await m.answer("🛡 <b>Админ-панель</b>", reply_markup=kb, parse_mode="HTML")
@@ -314,7 +334,7 @@ async def admin_users(cb: types.CallbackQuery):
         if u[3]: status.append("🚫 Заблок.")
         elif u[2] and is_premium_active({"premium_until": u[2]}): status.append("💎 Премиум")
         elif not u[1]: status.append("🆓 Бесплатно")
-        else: status.append("❌ Лимит")
+        else: status.append(" Лимит")
         text += f"<code>{u[0]}</code> — {', '.join(status)}\n"
     await cb.message.answer(text, parse_mode="HTML")
 
@@ -332,7 +352,7 @@ async def process_grant(m: types.Message):
     try:
         target_id = int(m.text.strip())
         until = grant_premium(target_id, 30)
-        await m.answer(f"✅ Премиум выдан до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}")
+        await m.answer(f"✅ Премиум до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}")
     except ValueError:
         await m.answer("❌ Введите корректный ID")
     await m.set_state(None)
@@ -341,7 +361,7 @@ async def process_grant(m: types.Message):
 async def admin_block(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    await cb.message.answer("✍️ Введите ID для блокировки:")
+    await cb.message.answer("️ Введите ID для блокировки:")
     await cb.message.set_state("admin_waiting_block")
 
 @dp.message(StateFilter("admin_waiting_block"))
@@ -354,7 +374,7 @@ async def process_block(m: types.Message):
         conn.execute("UPDATE users SET is_blocked=1 WHERE user_id=?", (target_id,))
         conn.commit()
         conn.close()
-        await m.answer(f"🚫 Пользователь {target_id} заблокирован.")
+        await m.answer(f" Пользователь {target_id} заблокирован.")
     except ValueError:
         await m.answer("❌ Введите корректный ID")
     await m.set_state(None)
@@ -363,7 +383,7 @@ async def process_block(m: types.Message):
 async def admin_broadcast(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    await cb.message.answer("✍️ Введите текст рассылки:")
+    await cb.message.answer("️ Введите текст рассылки:")
     await cb.message.set_state("admin_waiting_broadcast")
 
 @dp.message(StateFilter("admin_waiting_broadcast"))
@@ -409,7 +429,7 @@ async def call_groq(name, occasion, holiday_type, facts, style, format):
         response = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": GROQ_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.7, "max_tokens": 300},
+            json={"model": GROQ_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.7, "max_tokens": 350},
             timeout=15.0
         )
         response.raise_for_status()
