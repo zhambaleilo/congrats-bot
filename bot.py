@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 
 # ========== КОНФИГ ==========
@@ -100,7 +100,7 @@ def detect_type(text):
             return val
     return "светский"
 
-# ========== ПРОМПТ (УЛУЧШЕННЫЙ) ==========
+# ========== ПРОМПТ ==========
 PROMPT = """Ты — профессиональный поэт и копирайтер. Сгенерируй поздравление:
 
 ДАННЫЕ:
@@ -111,10 +111,10 @@ PROMPT = """Ты — профессиональный поэт и копирай
 СТИЛЬ: {style}
 
 КРИТИЧЕСКИ ВАЖНО:
-- Если стиль="стихи": создай НАСТОЯЩЕЕ рифмованное стихотворение с чёткой рифмой (ААББ или АБАБ), 4-8 строк
-- Если стиль="душевный": тёплый, эмоциональный, от сердца
-- Если стиль="смешной": добрый юмор, шутки
-- Если стиль="официальный": деловой, уважительный
+- Если стиль="стихи": создай НАСТОЯЩЕЕ рифмованное стихотворение!
+- Используй ТОЛЬКО парную (ААББ) или перекрёстную (АБАБ) рифмовку
+- Соблюдай ритм: 4-8 строк с одинаковым размером
+- Каждая строка должна рифмоваться! ПРОВЕРЬ рифму перед выводом
 
 ПРАВИЛА ПО РЕЛИГИЯМ:
 - Если тип="православный": ТОЛЬКО "Христос Воскресе", "светлого праздника". Без юмора.
@@ -122,13 +122,22 @@ PROMPT = """Ты — профессиональный поэт и копирай
 - Если тип="буддийский": ТОЛЬКО "Сагаан hараар", "Бурхан багша". Без юмора.
 - НЕ СМЕШИВАЙ РЕЛИГИИ!
 
+СТИЛИ:
+- "душевный": тёплый, эмоциональный, от сердца
+- "смешной": добрый юмор, шутки, игра слов
+- "официальный": деловой, уважительный
+- "креативный": с метафорами, оригинальными сравнениями
+
+ОБРАБОТКА ЗНАМЕНИТОСТЕЙ:
+- Если имя известное (Киркоров, Бузова и т.д.), добавь 1 упоминание их профессии
+- Используй торжественный тон для знаменитостей
+
 ОБЩИЕ ПРАВИЛА:
 1. Обязательно вплетай факты из {facts}
 2. Избегай клише: "счастья, здоровья, успехов"
-3. Для стихов ПРОВЕРЬ рифму!
-4. Верни ТОЛЬКО готовый текст. Без пояснений."""
+3. Верни ТОЛЬКО готовый текст. Без пояснений."""
 
-# ========== FSM (УПРОЩЁННЫЙ - БЕЗ ФОРМАТА) ==========
+# ========== FSM (БЕЗ ФОРМАТА) ==========
 class CongratsFSM(StatesGroup):
     name = State()
     occasion = State()
@@ -193,7 +202,7 @@ async def process_style(cb: types.CallbackQuery, state: FSMContext):
     if user["free_used"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=PAYMENT_URL)],
-            [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen_style")]
+            [InlineKeyboardButton(text="🔄 Попробовать другой стиль", callback_data="regen_style")]
         ])
         await cb.message.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит", reply_markup=kb)
         await state.clear()
@@ -212,13 +221,14 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         if not user["is_admin"] and not is_premium_active(user):
             set_used(uid)
 
-        # Отправляем текст поздравления
+        # ✅ Отправляем текст поздравления
         await cb.message.answer(text, parse_mode="HTML")
 
-        # Формируем кнопки
+        # ✅ Текстовая инструкция вместо кнопки "Копировать"
+        await cb.message.answer("📋 <i>Скопируй текст выше</i>", parse_mode="HTML")
+
         share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
         buttons = [
-            InlineKeyboardButton(text="📋 Скопировать", copy_text=types.CopyTextButton(text=text))
             [InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]
         ]
         
