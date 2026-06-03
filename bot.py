@@ -5,6 +5,7 @@ import httpx
 import logging
 import sqlite3
 import time
+import urllib.parse
 from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -207,7 +208,7 @@ class AdminFSM(StatesGroup):
     waiting_broadcast = State()
     waiting_new_link = State()
 
-# ========== ПРИОРИТЕТНЫЕ ХЕНДЛЕРЫ (РАБОТАЮТ ВСЕГДА) ==========
+# ========== ПРИОРИТЕТНЫЕ ХЕНДЛЕРЫ ==========
 @dp.message(Command("start", "new", "cancel", "admin", "pay"))
 async def cmd_priority(m: types.Message, state: FSMContext):
     await state.clear()
@@ -230,16 +231,15 @@ async def cmd_priority(m: types.Message, state: FSMContext):
         return await m.answer("🛡 <b>Админ-панель</b>", reply_markup=kb, parse_mode="HTML")
 
     if m.text == "/pay":
-        await m.answer(
-            "📤 Отправьте скриншот оплаты или номер транзакции.\n\n"
-            "✅ Проверьте, что в чеке указано:\n"
-            "• Сумма: 200₽\n"
-            "• Дата: сегодня\n"
-            f"• Получатель: {ADMIN_USERNAME}\n\n"
-            "Админ проверит и активирует премиум в течение 15 минут.",
+        link = get_payment_link()
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=link)]])
+        return await m.answer(
+            "💳 <b>Вы перешли к оплате.</b>\n\n"
+            "После оплаты отправьте скриншот чека в этот чат.\n"
+            "Наш администратор проверит платёж и активирует премиум.",
+            reply_markup=kb,
             parse_mode="HTML"
         )
-        return await state.set_state(PaymentFSM.waiting_check)
 
     user = get_user(m.from_user.id)
     if user["is_blocked"]:
@@ -252,6 +252,24 @@ async def cmd_priority(m: types.Message, state: FSMContext):
 @dp.message(CongratsFSM.name)
 async def get_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text.strip())
+    
+    uid = m.from_user.id
+    access = check_user_access(uid)
+    
+    if not access["can_generate"]:
+        if access["reason"] == "blocked":
+            await m.answer("🚫 Ваш доступ ограничен.")
+        elif access["reason"] == "limit":
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
+            await m.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит", reply_markup=kb)
+        elif access["reason"] == "awaiting_check":
+            await m.answer("⏳ Ваша заявка на премиум находится на проверке у админа.")
+        elif access["reason"] == "expired":
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", callback_data="action_pay")]])
+            await m.answer("❌ Премиум истёк. Продли подписку.", reply_markup=kb)
+        await state.clear()
+        return
+    
     await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, Сагаалган, Рамадан, корпоратив, покупка жилья...)?", parse_mode="HTML")
     await state.set_state(CongratsFSM.occasion)
 
@@ -286,18 +304,15 @@ async def process_style(cb: types.CallbackQuery, state: FSMContext):
         if access["reason"] == "blocked":
             return await cb.message.answer("🚫 Ваш доступ ограничен.")
         elif access["reason"] == "limit":
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=get_payment_link())],
-                [InlineKeyboardButton(text="🔄 Попробовать другой стиль", callback_data="regen_style")]
-            ])
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
             await cb.message.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит", reply_markup=kb)
             await state.clear()
             return
         elif access["reason"] == "awaiting_check":
             return await cb.message.answer("⏳ Ваша заявка на премиум находится на проверке у админа.")
         elif access["reason"] == "expired":
-            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", url=get_payment_link())]])
-            return await cb.message.answer("❌ Премиум истёк. Продли подписку: ", reply_markup=kb)
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", callback_data="action_pay")]])
+            return await cb.message.answer("❌ Премиум истёк. Продли подписку.", reply_markup=kb)
 
     await generate_congrats(cb, state, uid, access)
 
@@ -311,25 +326,33 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         if not access["is_premium"] and access["free_used"] == 0:
             set_used(uid)
 
-        reminder_text = ""
+        await cb.message.answer(text, parse_mode="HTML")
+        
         if access.get("show_reminder"):
             time_left = int(access["premium_until"]) - int(time.time())
             if time_left <= 86400:
-                reminder_text = f"\n\n⚠️ Премиум истекает сегодня. Продли сейчас: {get_payment_link()}"
+                reminder_text = "⚠️ Премиум истекает сегодня. Продли сейчас:"
             elif time_left <= 2 * 86400:
-                reminder_text = f"\n\n⏳ Премиум истекает завтра! Продли: {get_payment_link()}"
+                reminder_text = "⏳ Премиум истекает завтра! Продли:"
             else:
-                reminder_text = f"\n\n💎 Премиум действует ещё {time_left // 86400} дн. Продлить: {get_payment_link()}"
+                reminder_text = f"💎 Премиум действует ещё {time_left // 86400} дн. Продлить:"
+            
             set_last_reminder(uid)
+            await asyncio.sleep(0.5)
+            rem_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить", callback_data="action_pay")]])
+            await cb.message.answer(reminder_text, reply_markup=rem_kb, parse_mode="HTML")
 
-        await cb.message.answer(text + reminder_text, parse_mode="HTML")
         await cb.message.answer("📋 <i>Скопируй текст выше</i>", parse_mode="HTML")
 
-        share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Готовое+поздравление"
-        buttons = [[InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]]
+        # ✅ ТЗ Задача 6: Красивый текст при нажатии кнопки "Поделиться" с именем и упоминанием бота
+        name = data.get("name", "вашего близкого")
+        share_text = f"🎁 Персональное поздравление для {name}!\n\nСоздано в @{BOT_USERNAME}"
+        share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text={urllib.parse.quote(share_text)}"
+        
+        buttons = [[InlineKeyboardButton(text="📤 Поделиться поздравлением", url=share_url)]]
         
         if not access["is_premium"]:
-            buttons.append([InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=get_payment_link())])
+            buttons.append([InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")])
         
         buttons.append([InlineKeyboardButton(text="🆕 Новое поздравление", callback_data="new_congrats")])
         
@@ -356,13 +379,13 @@ async def new_congrats(cb: types.CallbackQuery, state: FSMContext):
     access = check_user_access(uid)
     
     if not access["can_generate"] and access.get("reason") == "limit":
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", url=get_payment_link())]])
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
         return await cb.message.answer("🎁 Бесплатная попытка использована.", reply_markup=kb)
     elif not access["can_generate"] and access.get("reason") == "expired":
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", url=get_payment_link())]])
-        return await cb.message.answer("❌ Премиум истёк. Продли подписку: ", reply_markup=kb)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", callback_data="action_pay")]])
+        return await cb.message.answer("❌ Премиум истёк. Продли подписку.", reply_markup=kb)
 
-    await cb.message.answer("✍️ <b>Кого поздравляем?</b> (имя)", parse_mode="HTML")
+    await cb.message.answer("✍️ <b>Новое поздравление</b>\n\nКого поздравляем? (имя)", parse_mode="HTML")
     await state.set_state(CongratsFSM.name)
 
 @dp.callback_query(F.data == "regen_style")
@@ -376,6 +399,19 @@ async def regen_style(cb: types.CallbackQuery, state: FSMContext):
     ])
     await cb.message.edit_text("✨ <b>Выбери стиль:</b>", reply_markup=kb, parse_mode="HTML")
     await state.set_state(CongratsFSM.style)
+
+@dp.callback_query(F.data == "action_pay")
+async def action_pay(cb: types.CallbackQuery):
+    await cb.answer()
+    link = get_payment_link()
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=link)]])
+    await cb.message.answer(
+        "💳 <b>Вы перешли к оплате.</b>\n\n"
+        "После оплаты отправьте скриншот чека в этот чат (или используйте команду /pay).\n"
+        "Наш администратор проверит платёж и активирует премиум.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
 
 # ========== ВАЛИДАЦИЯ ЧЕКА ==========
 @dp.message(PaymentFSM.waiting_check, F.content_type.in_({'photo', 'text'}))
@@ -594,13 +630,20 @@ async def admin_approve_check(cb: types.CallbackQuery):
     conn.commit()
     conn.close()
     
+    try:
+        await bot.send_message(
+            target_uid,
+            "✅ <b>Ваш премиум успешно активирован!</b>\n\n"
+            f"Срок действия: до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}\n"
+            "Теперь вы можете пользоваться всеми функциями без ограничений.\n\n"
+            "Спасибо за оплату! 🎉",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logging.warning(f"Не удалось отправить уведомление пользователю {target_uid}: {e}")
+    
     await cb.answer("✅ Премиум активирован!", show_alert=True)
     await cb.message.edit_text(cb.message.text + "\n\n✅ <b>СТАТУС: ОДОБРЕНО И АКТИВИРОВАНО</b>", parse_mode="HTML")
-    
-    try:
-        await bot.send_message(target_uid, f"✅ Ваша оплата проверена! Премиум активирован до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}. Спасибо!")
-    except:
-        pass
 
 @dp.callback_query(F.data.startswith("admin_reject_check_"))
 async def admin_reject_check(cb: types.CallbackQuery):
@@ -648,17 +691,19 @@ async def call_groq(name, occasion, holiday_type, facts, style):
 async def main():
     init_db()
     
+    # ✅ ТЗ Задача 7: В меню слева только одна команда для старта (/start)
     await bot.set_chat_menu_button(
         menu_button=MenuButtonCommands(
-            text="🆕 Новое поздравление",
-            command="new"
+            text="🆕 Начать",
+            command="start"
         )
     )
+    
+    # ✅ ТЗ Задача 7: Убрана дублирующая команда /new из видимого списка команд
     await bot.set_my_commands([
         BotCommand(command="start", description="Запустить бота"),
-        BotCommand(command="new", description="Новое поздравление"),
         BotCommand(command="pay", description="Оформить подписку"),
-        BotCommand(command="cancel", description="Отменить текущий сценарий"),
+        BotCommand(command="cancel", description="Отменить сценарий"),
         BotCommand(command="admin", description="Панель администратора")
     ])
     
