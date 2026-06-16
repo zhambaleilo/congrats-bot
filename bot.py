@@ -5,7 +5,6 @@ import httpx
 import logging
 import sqlite3
 import time
-import urllib.parse
 from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -20,12 +19,14 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "CongratsTurnBot")
-ADMIN_USERNAME = "@zhambaleilo"
 
-_raw_payment_url = os.getenv("PAYMENT_URL", "#")
-CURRENT_PAYMENT_URL = _raw_payment_url if _raw_payment_url and _raw_payment_url != "#" else None
+# ✅ НОВЫЙ АДМИН
+ADMIN_ID = 8858718958
+ADMIN_USERNAME = "@AdBotov"
 
-ADMIN_ID = 5174945583
+# ✅ НОВАЯ ССЫЛКА НА ОПЛАТУ
+CURRENT_PAYMENT_URL = "https://www.tinkoff.ru/rm/r_fywFPJfgmN.idgWOeMoBc/Kjf5q79974"
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -230,16 +231,19 @@ async def cmd_priority(m: types.Message, state: FSMContext):
         ])
         return await m.answer("🛡 <b>Админ-панель</b>", reply_markup=kb, parse_mode="HTML")
 
+    # ✅ ИСПРАВЛЕНИЕ 1: Команда /pay теперь устанавливает состояние для приёма чека
     if m.text == "/pay":
         link = get_payment_link()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=link)]])
-        return await m.answer(
+        await m.answer(
             "💳 <b>Вы перешли к оплате.</b>\n\n"
             "После оплаты отправьте скриншот чека в этот чат.\n"
-            "Наш администратор проверит платёж и активирует премиум.",
+            f"Наш администратор ({ADMIN_USERNAME}) проверит платёж и активирует премиум.",
             reply_markup=kb,
             parse_mode="HTML"
         )
+        await state.set_state(PaymentFSM.waiting_check)
+        return
 
     user = get_user(m.from_user.id)
     if user["is_blocked"]:
@@ -326,6 +330,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         if not access["is_premium"] and access["free_used"] == 0:
             set_used(uid)
 
+        # ✅ Разделение поздравления и напоминания на 2 сообщения
         await cb.message.answer(text, parse_mode="HTML")
         
         if access.get("show_reminder"):
@@ -344,12 +349,9 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
 
         await cb.message.answer("📋 <i>Скопируй текст выше</i>", parse_mode="HTML")
 
-        # ✅ ТЗ Задача 6: Красивый текст при нажатии кнопки "Поделиться" с именем и упоминанием бота
-        name = data.get("name", "вашего близкого")
-        share_text = f"🎁 Персональное поздравление для {name}!\n\nСоздано в @{BOT_USERNAME}"
-        share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text={urllib.parse.quote(share_text)}"
-        
-        buttons = [[InlineKeyboardButton(text="📤 Поделиться поздравлением", url=share_url)]]
+        # ✅ ИСПРАВЛЕНИЕ 2: Кнопка "Поделиться ботом" с простой ссылкой
+        share_url = f"https://t.me/{BOT_USERNAME}"
+        buttons = [[InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]]
         
         if not access["is_premium"]:
             buttons.append([InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")])
@@ -400,18 +402,20 @@ async def regen_style(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_text("✨ <b>Выбери стиль:</b>", reply_markup=kb, parse_mode="HTML")
     await state.set_state(CongratsFSM.style)
 
+# ✅ ИСПРАВЛЕНИЕ 1: Callback action_pay теперь устанавливает состояние
 @dp.callback_query(F.data == "action_pay")
-async def action_pay(cb: types.CallbackQuery):
+async def action_pay(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
     link = get_payment_link()
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=link)]])
     await cb.message.answer(
         "💳 <b>Вы перешли к оплате.</b>\n\n"
-        "После оплаты отправьте скриншот чека в этот чат (или используйте команду /pay).\n"
-        "Наш администратор проверит платёж и активирует премиум.",
+        "После оплаты отправьте скриншот чека в этот чат.\n"
+        f"Наш администратор ({ADMIN_USERNAME}) проверит платёж и активирует премиум.",
         reply_markup=kb,
         parse_mode="HTML"
     )
+    await state.set_state(PaymentFSM.waiting_check)
 
 # ========== ВАЛИДАЦИЯ ЧЕКА ==========
 @dp.message(PaymentFSM.waiting_check, F.content_type.in_({'photo', 'text'}))
@@ -691,7 +695,6 @@ async def call_groq(name, occasion, holiday_type, facts, style):
 async def main():
     init_db()
     
-    # ✅ ТЗ Задача 7: В меню слева только одна команда для старта (/start)
     await bot.set_chat_menu_button(
         menu_button=MenuButtonCommands(
             text="🆕 Начать",
@@ -699,7 +702,6 @@ async def main():
         )
     )
     
-    # ✅ ТЗ Задача 7: Убрана дублирующая команда /new из видимого списка команд
     await bot.set_my_commands([
         BotCommand(command="start", description="Запустить бота"),
         BotCommand(command="pay", description="Оформить подписку"),
