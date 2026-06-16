@@ -350,7 +350,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
         await cb.message.answer("📋 <i>Скопируй текст выше</i>", parse_mode="HTML")
 
         # ✅ ИСПРАВЛЕНИЕ 2: Кнопка "Поделиться ботом" с простой ссылкой
-        share_url = f"https://t.me/{BOT_USERNAME}"
+        share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=🎉 Бот для поздравлений — живые тексты за 10 секунд!"
         buttons = [[InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]]
         
         if not access["is_premium"]:
@@ -464,19 +464,18 @@ async def admin_users(cb: types.CallbackQuery):
         elif not u[1]: status.append("🆓 Бесплатно")
         else: status.append("❌ Лимит")
         text += f"<code>{u[0]}</code> — {', '.join(status)}\n"
-    
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🛡 Вернуться в Админку", callback_data="admin_back")]])
     await cb.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_grant")
-async def admin_grant(cb: types.CallbackQuery):
+async def admin_grant(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     await cb.message.answer("✍️ Введите ID пользователя:")
-    await cb.message.set_state(AdminFSM.waiting_grant)
+    await state.set_state(AdminFSM.waiting_grant)
 
 @dp.message(AdminFSM.waiting_grant)
-async def process_grant(m: types.Message):
+async def process_grant(m: types.Message, state: FSMContext):
     if m.from_user.id != ADMIN_ID:
         return
     try:
@@ -485,17 +484,17 @@ async def process_grant(m: types.Message):
         await m.answer(f"✅ Премиум до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}")
     except ValueError:
         await m.answer("❌ Введите корректный ID")
-    await m.set_state(None)
+    await state.clear()
 
 @dp.callback_query(F.data == "admin_block")
-async def admin_block(cb: types.CallbackQuery):
+async def admin_block(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     await cb.message.answer("✍️ Введите ID для блокировки:")
-    await cb.message.set_state(AdminFSM.waiting_block)
+    await state.set_state(AdminFSM.waiting_block)
 
 @dp.message(AdminFSM.waiting_block)
-async def process_block(m: types.Message):
+async def process_block(m: types.Message, state: FSMContext):
     if m.from_user.id != ADMIN_ID:
         return
     try:
@@ -507,44 +506,46 @@ async def process_block(m: types.Message):
         await m.answer(f"🚫 Пользователь {target_id} заблокирован.")
     except ValueError:
         await m.answer("❌ Введите корректный ID")
-    await m.set_state(None)
+    await state.clear()
 
 @dp.callback_query(F.data == "admin_broadcast")
-async def admin_broadcast(cb: types.CallbackQuery):
+async def admin_broadcast(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     await cb.message.answer("✍️ Введите текст рассылки:")
-    await cb.message.set_state(AdminFSM.waiting_broadcast)
+    await state.set_state(AdminFSM.waiting_broadcast)
 
 @dp.message(AdminFSM.waiting_broadcast)
-async def process_broadcast(m: types.Message):
+async def process_broadcast(m: types.Message, state: FSMContext):
     if m.from_user.id != ADMIN_ID:
         return
     text = m.text
     conn = sqlite3.connect(DB_PATH)
     users = conn.execute("SELECT user_id FROM users WHERE is_blocked=0").fetchall()
     conn.close()
+    
     sent, failed = 0, 0
     for (uid,) in users:
         try:
             await bot.send_message(uid, text)
             sent += 1
-            await asyncio.sleep(0.5)
-        except:
+        except Exception as e:
+            logging.warning(f"Не удалось отправить {uid}: {e}")
             failed += 1
+        await asyncio.sleep(0.5)
+    
     await m.answer(f"✅ Отправлено: {sent}\n❌ Ошибки: {failed}")
-    await m.set_state(None)
+    await state.clear()
 
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     conn = sqlite3.connect(DB_PATH)
-    total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    premium = conn.execute("SELECT COUNT(*) FROM users WHERE premium_until IS NOT NULL").fetchone()[0]
+    total = conn.execute("SELECT COUNT() FROM users").fetchone()[0]
+    premium = conn.execute("SELECT COUNT() FROM users WHERE premium_until IS NOT NULL").fetchone()[0]
     blocked = conn.execute("SELECT COUNT(*) FROM users WHERE is_blocked=1").fetchone()[0]
     conn.close()
-    
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🛡 Вернуться в Админку", callback_data="admin_back")]])
     await cb.message.answer(f"📊 <b>Статистика:</b>\n\nВсего: {total}\nПремиум: {premium}\nЗаблокировано: {blocked}", reply_markup=kb, parse_mode="HTML")
 
@@ -552,7 +553,6 @@ async def admin_stats(cb: types.CallbackQuery):
 async def admin_sandbox(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🆕 Новый юзер (0 попыток)", callback_data="sandbox_new_user")],
         [InlineKeyboardButton(text="🚫 Лимит исчерпан", callback_data="sandbox_limit_used")],
@@ -570,25 +570,24 @@ async def admin_sandbox(cb: types.CallbackQuery):
 async def apply_sandbox(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    
     role = cb.data.replace("sandbox_", "")
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE users SET is_sandbox=1, sandbox_role=? WHERE user_id=?", (role, cb.from_user.id))
     conn.commit()
     conn.close()
-    
+
     await cb.answer(f"✅ Роль '{role}' применена!", show_alert=True)
     await cb.message.edit_text(f"🧪 <b>Режим песочницы активен!</b>\nВаша текущая роль: <code>{role}</code>\n\nТеперь вы можете протестировать логику бота. Чтобы выйти, нажмите 'Вернуться в Админку'.", reply_markup=cb.message.reply_markup, parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_update_link")
-async def admin_update_link(cb: types.CallbackQuery):
+async def admin_update_link(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    await cb.message.answer("✍️ Введите новую ссылку на оплату (или 'нет', чтобы сбросить и показать контакт админа):")
-    await cb.message.set_state(AdminFSM.waiting_new_link)
+    await cb.message.answer("✍️ Введите новую ссылку на оплату (или 'нет', чтобы сбросить):")
+    await state.set_state(AdminFSM.waiting_new_link)
 
 @dp.message(AdminFSM.waiting_new_link)
-async def process_update_link(m: types.Message):
+async def process_update_link(m: types.Message, state: FSMContext):
     if m.from_user.id != ADMIN_ID:
         return
     global CURRENT_PAYMENT_URL
@@ -598,18 +597,17 @@ async def process_update_link(m: types.Message):
     else:
         CURRENT_PAYMENT_URL = m.text.strip()
         await m.answer(f"✅ Ссылка на оплату обновлена:\n{CURRENT_PAYMENT_URL}")
-    await m.set_state(None)
+    await state.clear()
 
 @dp.callback_query(F.data == "admin_back")
 async def admin_back(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE users SET is_sandbox=0, sandbox_role=NULL WHERE user_id=?", (cb.from_user.id,))
     conn.commit()
     conn.close()
-    
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")],
         [InlineKeyboardButton(text="💎 Выдать премиум", callback_data="admin_grant")],
@@ -625,15 +623,14 @@ async def admin_back(cb: types.CallbackQuery):
 async def admin_approve_check(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    
     target_uid = int(cb.data.replace("admin_approve_check_", ""))
     until = grant_premium(target_uid, 30)
-    
+
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE users SET is_sandbox=0, sandbox_role=NULL WHERE user_id=?", (target_uid,))
     conn.commit()
     conn.close()
-    
+
     try:
         await bot.send_message(
             target_uid,
@@ -645,7 +642,7 @@ async def admin_approve_check(cb: types.CallbackQuery):
         )
     except Exception as e:
         logging.warning(f"Не удалось отправить уведомление пользователю {target_uid}: {e}")
-    
+
     await cb.answer("✅ Премиум активирован!", show_alert=True)
     await cb.message.edit_text(cb.message.text + "\n\n✅ <b>СТАТУС: ОДОБРЕНО И АКТИВИРОВАНО</b>", parse_mode="HTML")
 
@@ -653,17 +650,16 @@ async def admin_approve_check(cb: types.CallbackQuery):
 async def admin_reject_check(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
-    
     target_uid = int(cb.data.replace("admin_reject_check_", ""))
-    
+
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE users SET is_sandbox=0, sandbox_role=NULL WHERE user_id=?", (target_uid,))
     conn.commit()
     conn.close()
-    
+
     await cb.answer("❌ Заявка отклонена", show_alert=True)
     await cb.message.edit_text(cb.message.text + "\n\n❌ <b>СТАТУС: ОТКЛОНЕНО</b>", parse_mode="HTML")
-    
+
     try:
         await bot.send_message(target_uid, f"❌ К сожалению, ваш чек не прошёл проверку. Пожалуйста, проверьте данные и попробуйте снова или напишите админу {ADMIN_USERNAME}.")
     except:
