@@ -140,7 +140,7 @@ def check_user_access(uid):
         }
 
     if free_used >= 3:  # ✅ изменить число здесь
-    return {"can_generate": False, "is_premium": False, "free_used": free_used, "reason": "limit"}
+        return {"can_generate": False, "is_premium": False, "free_used": free_used, "reason": "limit"}
 
     return {"can_generate": True, "is_premium": False, "free_used": 0}
 
