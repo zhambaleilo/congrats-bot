@@ -73,7 +73,7 @@ def get_user(uid):
 
 def set_used(uid):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("UPDATE users SET free_used=1 WHERE user_id=?", (uid,))
+    conn.execute("UPDATE users SET free_used=free_used+1 WHERE user_id=?", (uid,))  # ✅ +1 вместо =1
     conn.commit()
     conn.close()
 
@@ -139,8 +139,8 @@ def check_user_access(uid):
             "show_reminder": show_reminder, "premium_until": user["premium_until"]
         }
 
-    if free_used:
-        return {"can_generate": False, "is_premium": False, "free_used": 1, "reason": "limit"}
+    if free_used >= 3:  # ✅ изменить число здесь
+    return {"can_generate": False, "is_premium": False, "free_used": free_used, "reason": "limit"}
 
     return {"can_generate": True, "is_premium": False, "free_used": 0}
 
@@ -265,7 +265,8 @@ async def get_name(m: types.Message, state: FSMContext):
             await m.answer("🚫 Ваш доступ ограничен.")
         elif access["reason"] == "limit":
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
-            await m.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит", reply_markup=kb)
+            remaining = 3 - access["free_used"]  # ✅ добавить
+            await m.answer(f"🎁 Осталось бесплатных попыток: {remaining}\n\n🔓 Подписка: безлимит", reply_markup=kb)  # ✅ изменить
         elif access["reason"] == "awaiting_check":
             await m.answer("⏳ Ваша заявка на премиум находится на проверке у админа.")
         elif access["reason"] == "expired":
@@ -309,7 +310,8 @@ async def process_style(cb: types.CallbackQuery, state: FSMContext):
             return await cb.message.answer("🚫 Ваш доступ ограничен.")
         elif access["reason"] == "limit":
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
-            await cb.message.answer("🎁 Бесплатная попытка использована.\n\n🔓 Подписка: безлимит", reply_markup=kb)
+            remaining = 3 - access["free_used"]  # ✅ добавить
+            await m.answer(f"🎁 Осталось бесплатных попыток: {remaining}\n\n🔓 Подписка: безлимит", reply_markup=kb)  # ✅ изменить
             await state.clear()
             return
         elif access["reason"] == "awaiting_check":
@@ -327,7 +329,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
     try:
         text = await call_groq(data["name"], data["occasion"], data["holiday_type"], data["facts"], data["style"])
         
-        if not access["is_premium"] and access["free_used"] == 0:
+        if not access["is_premium"] and access["free_used"] < 3:
             set_used(uid)
 
         # ✅ Разделение поздравления и напоминания на 2 сообщения
@@ -379,10 +381,11 @@ async def new_congrats(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
     uid = cb.from_user.id
     access = check_user_access(uid)
-    
+        
     if not access["can_generate"] and access.get("reason") == "limit":
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
-        return await cb.message.answer("🎁 Бесплатная попытка использована.", reply_markup=kb)
+        remaining = 3 - access["free_used"]  # ✅ добавить
+    return await cb.message.answer(f"🎁 Осталось бесплатных попыток: {remaining}", reply_markup=kb)  # ✅ изменить
     elif not access["can_generate"] and access.get("reason") == "expired":
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", callback_data="action_pay")]])
         return await cb.message.answer("❌ Премиум истёк. Продли подписку.", reply_markup=kb)
