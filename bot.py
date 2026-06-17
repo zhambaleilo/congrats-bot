@@ -19,12 +19,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "CongratsTurnBot")
-
-# ✅ НОВЫЙ АДМИН
 ADMIN_ID = 8858718958
 ADMIN_USERNAME = "@AdBotov"
-
-# ✅ НОВАЯ ССЫЛКА НА ОПЛАТУ
 CURRENT_PAYMENT_URL = "https://www.tinkoff.ru/rm/r_fywFPJfgmN.idgWOeMoBc/Kjf5q79974"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -57,7 +53,10 @@ def init_db():
 
 def get_user(uid):
     conn = sqlite3.connect(DB_PATH)
-    cur = conn.execute("SELECT free_used, premium_until, is_admin, is_blocked, is_sandbox, sandbox_role, last_reminder FROM users WHERE user_id=?", (uid,))
+    cur = conn.execute(
+        "SELECT free_used, premium_until, is_admin, is_blocked, is_sandbox, sandbox_role, last_reminder FROM users WHERE user_id=?",
+        (uid,)
+    )
     res = cur.fetchone()
     conn.close()
     if not res:
@@ -67,13 +66,13 @@ def get_user(uid):
         conn.close()
         return {"free_used": 0, "premium_until": None, "is_admin": 0, "is_blocked": 0, "is_sandbox": 0, "sandbox_role": None, "last_reminder": 0}
     return {
-        "free_used": res[0], "premium_until": res[1], "is_admin": res[2], 
+        "free_used": res[0], "premium_until": res[1], "is_admin": res[2],
         "is_blocked": res[3], "is_sandbox": res[4], "sandbox_role": res[5], "last_reminder": res[6] or 0
     }
 
 def set_used(uid):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("UPDATE users SET free_used=free_used+1 WHERE user_id=?", (uid,))  # ✅ +1 вместо =1
+    conn.execute("UPDATE users SET free_used=free_used+1 WHERE user_id=?", (uid,))  # ✅ ИСПРАВЛЕНО: увеличиваем на 1
     conn.commit()
     conn.close()
 
@@ -110,7 +109,7 @@ def check_user_access(uid):
         if role == "new_user":
             return {"can_generate": True, "is_premium": False, "free_used": 0}
         elif role == "limit_used":
-            return {"can_generate": False, "is_premium": False, "free_used": 1, "reason": "limit"}
+            return {"can_generate": False, "is_premium": False, "free_used": 3, "reason": "limit"}  # ✅ ИСПРАВЛЕНО: 3 вместо 1
         elif role == "premium_active":
             return {"can_generate": True, "is_premium": True, "premium_until": now + 30*86400}
         elif role == "premium_3days":
@@ -135,11 +134,11 @@ def check_user_access(uid):
                 if int(time.time()) - user.get("last_reminder", 0) > 86400:
                     show_reminder = True
         return {
-            "can_generate": True, "is_premium": is_prem, "free_used": free_used, 
+            "can_generate": True, "is_premium": is_prem, "free_used": free_used,
             "show_reminder": show_reminder, "premium_until": user["premium_until"]
         }
 
-    if free_used >= 3:  # ✅ изменить число здесь
+    if free_used >= 3:  # ✅ ИСПРАВЛЕНО: >= 3 с правильным отступом
         return {"can_generate": False, "is_premium": False, "free_used": free_used, "reason": "limit"}
 
     return {"can_generate": True, "is_premium": False, "free_used": 0}
@@ -172,21 +171,26 @@ PROMPT = """Ты — профессиональный копирайтер. Сг
 ТИП: {holiday_type}
 ФАКТЫ: {facts}
 СТИЛЬ: {style}
+
 КРИТИЧЕСКИ ВАЖНО:
 Если пользователь запрашивает поздравление с теми же параметрами повторно, ОБЯЗАТЕЛЬНО создай совершенно новый текст. Не повторяй предыдущие фразы, меняй структуру, метафоры, ритм и порядок мыслей. Каждый ответ должен быть уникальным.
+
 ПРАВИЛА ПО РЕЛИГИЯМ:
 Если тип="православный": ТОЛЬКО "Христос Воскресе", "светлого праздника" и т.д. Без юмора.
 Если тип="мусульманский": ТОЛЬКО "Рамадан Мубарак", "Ид Мубарак" и т.д.. Без юмора.
 Если тип="буддийский": ТОЛЬКО "Сагаан hараар", "Бурхан багша" и т.д. Без юмора.
 НЕ СМЕШИВАЙ РЕЛИГИИ!
+
 СТИЛИ:
 "душевный": тёплый, эмоциональный, от сердца
 "смешной": добрый юмор, шутки, игра слов
 "официальный": деловой, уважительный
 "креативный": с метафорами, оригинальными сравнениями
+
 ОБРАБОТКА ЗНАМЕНИТОСТЕЙ:
 Если имя известное (Киркоров, Бузова, Билли Айлиш и т.д.), добавь 1 упоминание их профессии
 Используй торжественный тон для знаменитостей
+
 ОБЩИЕ ПРАВИЛА:
 Обязательно вплетай факты из {facts}
 Избегай клише: "счастья, здоровья, успехов"
@@ -216,7 +220,7 @@ async def cmd_priority(m: types.Message, state: FSMContext):
     
     if m.text == "/cancel":
         return await m.answer("❌ Сценарий отменён. Напишите /start, чтобы начать заново.")
-        
+    
     if m.text == "/admin":
         if m.from_user.id != ADMIN_ID:
             return await m.answer("🚫 Доступ запрещён")
@@ -231,12 +235,11 @@ async def cmd_priority(m: types.Message, state: FSMContext):
         ])
         return await m.answer("🛡 <b>Админ-панель</b>", reply_markup=kb, parse_mode="HTML")
 
-    # ✅ ИСПРАВЛЕНИЕ 1: Команда /pay теперь устанавливает состояние для приёма чека
     if m.text == "/pay":
         link = get_payment_link()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=link)]])
         await m.answer(
-            "💳 <b>Вы перешли к оплате.</b>\n\n"
+            f"💳 <b>Вы перешли к оплате.</b>\n\n"
             "После оплаты отправьте скриншот чека в этот чат.\n"
             f"Наш администратор ({ADMIN_USERNAME}) проверит платёж и активирует премиум.",
             reply_markup=kb,
@@ -248,7 +251,7 @@ async def cmd_priority(m: types.Message, state: FSMContext):
     user = get_user(m.from_user.id)
     if user["is_blocked"]:
         return await m.answer("🚫 Ваш доступ ограничен.")
-    
+
     await m.answer("🎉 Привет! Напишу живое поздравление за 10 сек.\n\n👤 <b>Кого поздравляем?</b> (имя)", parse_mode="HTML")
     await state.set_state(CongratsFSM.name)
 
@@ -256,17 +259,16 @@ async def cmd_priority(m: types.Message, state: FSMContext):
 @dp.message(CongratsFSM.name)
 async def get_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text.strip())
-    
     uid = m.from_user.id
     access = check_user_access(uid)
-    
+
     if not access["can_generate"]:
         if access["reason"] == "blocked":
             await m.answer("🚫 Ваш доступ ограничен.")
         elif access["reason"] == "limit":
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
-            remaining = 3 - access["free_used"]  # ✅ добавить
-            await m.answer(f"🎁 Осталось бесплатных попыток: {remaining}\n\n🔓 Подписка: безлимит", reply_markup=kb)  # ✅ изменить
+            remaining = 3 - access["free_used"]  # ✅ ИСПРАВЛЕНО: показываем остаток
+            await m.answer(f"🎁 Осталось бесплатных попыток: {remaining}\n\n🔓 Подписка: безлимит", reply_markup=kb)
         elif access["reason"] == "awaiting_check":
             await m.answer("⏳ Ваша заявка на премиум находится на проверке у админа.")
         elif access["reason"] == "expired":
@@ -274,7 +276,7 @@ async def get_name(m: types.Message, state: FSMContext):
             await m.answer("❌ Премиум истёк. Продли подписку.", reply_markup=kb)
         await state.clear()
         return
-    
+
     await m.answer("🎈 <b>Какой повод?</b>\n(Новый год, Пасха, День рождения, Сагаалган, Рамадан, корпоратив, покупка жилья...)?", parse_mode="HTML")
     await state.set_state(CongratsFSM.occasion)
 
@@ -302,16 +304,17 @@ async def process_style(cb: types.CallbackQuery, state: FSMContext):
     style_map = {"style_soul": "душевный", "style_funny": "смешной", "style_formal": "официальный", "style_creative": "креативный"}
     await state.update_data(style=style_map[cb.data])
     await cb.answer()
-    uid = cb.from_user.id
     
+    uid = cb.from_user.id
     access = check_user_access(uid)
+    
     if not access["can_generate"]:
         if access["reason"] == "blocked":
             return await cb.message.answer("🚫 Ваш доступ ограничен.")
         elif access["reason"] == "limit":
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
-            remaining = 3 - access["free_used"]  # ✅ добавить
-            await m.answer(f"🎁 Осталось бесплатных попыток: {remaining}\n\n🔓 Подписка: безлимит", reply_markup=kb)  # ✅ изменить
+            remaining = 3 - access["free_used"]  # ✅ ИСПРАВЛЕНО: показываем остаток
+            await cb.message.answer(f"🎁 Осталось бесплатных попыток: {remaining}\n\n🔓 Подписка: безлимит", reply_markup=kb)
             await state.clear()
             return
         elif access["reason"] == "awaiting_check":
@@ -329,20 +332,19 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
     try:
         text = await call_groq(data["name"], data["occasion"], data["holiday_type"], data["facts"], data["style"])
         
-        if not access["is_premium"] and access["free_used"] < 3:
+        if not access["is_premium"] and access["free_used"] < 3:  # ✅ ИСПРАВЛЕНО: < 3 вместо == 0
             set_used(uid)
 
-        # ✅ Разделение поздравления и напоминания на 2 сообщения
         await cb.message.answer(text, parse_mode="HTML")
         
         if access.get("show_reminder"):
             time_left = int(access["premium_until"]) - int(time.time())
             if time_left <= 86400:
-                reminder_text = "⚠️ Премиум истекает сегодня. Продли сейчас:"
+                reminder_text = "⚠️ Премиум истекает сегодня. Продли сейчас: "
             elif time_left <= 2 * 86400:
-                reminder_text = "⏳ Премиум истекает завтра! Продли:"
+                reminder_text = "⏳ Премиум истекает завтра! Продли: "
             else:
-                reminder_text = f"💎 Премиум действует ещё {time_left // 86400} дн. Продлить:"
+                reminder_text = f"💎 Премиум действует ещё {time_left // 86400} дн. Продлить: "
             
             set_last_reminder(uid)
             await asyncio.sleep(0.5)
@@ -351,8 +353,7 @@ async def generate_congrats(cb: types.CallbackQuery, state: FSMContext, uid: int
 
         await cb.message.answer("📋 <i>Скопируй текст выше</i>", parse_mode="HTML")
 
-        # ✅ ИСПРАВЛЕНИЕ 2: Кнопка "Поделиться ботом" с простой ссылкой
-        share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=🎉 Бот для поздравлений — живые тексты за 10 секунд!"
+        share_url = f"https://t.me/{BOT_USERNAME}"
         buttons = [[InlineKeyboardButton(text="📤 Поделиться ботом", url=share_url)]]
         
         if not access["is_premium"]:
@@ -381,11 +382,11 @@ async def new_congrats(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
     uid = cb.from_user.id
     access = check_user_access(uid)
-        
+    
     if not access["can_generate"] and access.get("reason") == "limit":
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
-        remaining = 3 - access["free_used"]  # ✅ добавить
-        return await cb.message.answer(f"🎁 Осталось бесплатных попыток: {remaining}", reply_markup=kb)  # ✅ изменить
+        remaining = 3 - access["free_used"]  # ✅ ИСПРАВЛЕНО: показываем остаток
+        return await cb.message.answer(f"🎁 Осталось бесплатных попыток: {remaining}", reply_markup=kb)
     elif not access["can_generate"] and access.get("reason") == "expired":
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", callback_data="action_pay")]])
         return await cb.message.answer("❌ Премиум истёк. Продли подписку.", reply_markup=kb)
@@ -405,14 +406,13 @@ async def regen_style(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_text("✨ <b>Выбери стиль:</b>", reply_markup=kb, parse_mode="HTML")
     await state.set_state(CongratsFSM.style)
 
-# ✅ ИСПРАВЛЕНИЕ 1: Callback action_pay теперь устанавливает состояние
 @dp.callback_query(F.data == "action_pay")
 async def action_pay(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
     link = get_payment_link()
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=link)]])
     await cb.message.answer(
-        "💳 <b>Вы перешли к оплате.</b>\n\n"
+        f"💳 <b>Вы перешли к оплате.</b>\n\n"
         "После оплаты отправьте скриншот чека в этот чат.\n"
         f"Наш администратор ({ADMIN_USERNAME}) проверит платёж и активирует премиум.",
         reply_markup=kb,
@@ -426,19 +426,18 @@ async def process_check(m: types.Message, state: FSMContext):
     uid = m.from_user.id
     username = m.from_user.username or "Нет юзернейма"
     date_str = datetime.now().strftime("%d.%m.%Y")
-    
     admin_text = f"🆕 <b>Новая заявка на премиум:</b>\n\n👤 Пользователь: @{username} (ID: <code>{uid}</code>)\n💳 Сумма: 200₽\n📅 Дата: {date_str}\n\n"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Активировать премиум", callback_data=f"admin_approve_check_{uid}")],
         [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_reject_check_{uid}")]
     ])
-    
+
     try:
         if m.photo:
             await bot.send_photo(ADMIN_ID, photo=m.photo[-1].file_id, caption=admin_text, reply_markup=kb, parse_mode="HTML")
         else:
             await bot.send_message(ADMIN_ID, text=admin_text + f"💬 Текст от пользователя:\n<code>{m.text}</code>", reply_markup=kb, parse_mode="HTML")
-            
+        
         await m.answer("✅ Чек отправлен админу! Ожидайте активации в течение 15 минут.")
         conn = sqlite3.connect(DB_PATH)
         conn.execute("UPDATE users SET is_sandbox=1, sandbox_role='awaiting_check' WHERE user_id=?", (uid,))
@@ -447,7 +446,7 @@ async def process_check(m: types.Message, state: FSMContext):
     except Exception as e:
         logging.exception("Ошибка отправки чека админу")
         await m.answer(f"❌ Произошла ошибка. Напишите админу {ADMIN_USERNAME}")
-    
+
     await state.clear()
 
 # ========== АДМИНКА ==========
@@ -471,14 +470,14 @@ async def admin_users(cb: types.CallbackQuery):
     await cb.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_grant")
-async def admin_grant(cb: types.CallbackQuery, state: FSMContext):
+async def admin_grant(cb: types.CallbackQuery, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     await cb.message.answer("✍️ Введите ID пользователя:")
-    await state.set_state(AdminFSM.waiting_grant)
+    await state.set_state(AdminFSM.waiting_grant)  # ✅ ИСПРАВЛЕНО: state.set_state
 
 @dp.message(AdminFSM.waiting_grant)
-async def process_grant(m: types.Message, state: FSMContext):
+async def process_grant(m: types.Message, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if m.from_user.id != ADMIN_ID:
         return
     try:
@@ -487,17 +486,17 @@ async def process_grant(m: types.Message, state: FSMContext):
         await m.answer(f"✅ Премиум до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}")
     except ValueError:
         await m.answer("❌ Введите корректный ID")
-    await state.clear()
+    await state.clear()  # ✅ ИСПРАВЛЕНО: state.clear()
 
 @dp.callback_query(F.data == "admin_block")
-async def admin_block(cb: types.CallbackQuery, state: FSMContext):
+async def admin_block(cb: types.CallbackQuery, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     await cb.message.answer("✍️ Введите ID для блокировки:")
     await state.set_state(AdminFSM.waiting_block)
 
 @dp.message(AdminFSM.waiting_block)
-async def process_block(m: types.Message, state: FSMContext):
+async def process_block(m: types.Message, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if m.from_user.id != ADMIN_ID:
         return
     try:
@@ -512,14 +511,14 @@ async def process_block(m: types.Message, state: FSMContext):
     await state.clear()
 
 @dp.callback_query(F.data == "admin_broadcast")
-async def admin_broadcast(cb: types.CallbackQuery, state: FSMContext):
+async def admin_broadcast(cb: types.CallbackQuery, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     await cb.message.answer("✍️ Введите текст рассылки:")
     await state.set_state(AdminFSM.waiting_broadcast)
 
 @dp.message(AdminFSM.waiting_broadcast)
-async def process_broadcast(m: types.Message, state: FSMContext):
+async def process_broadcast(m: types.Message, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if m.from_user.id != ADMIN_ID:
         return
     text = m.text
@@ -583,14 +582,14 @@ async def apply_sandbox(cb: types.CallbackQuery):
     await cb.message.edit_text(f"🧪 <b>Режим песочницы активен!</b>\nВаша текущая роль: <code>{role}</code>\n\nТеперь вы можете протестировать логику бота. Чтобы выйти, нажмите 'Вернуться в Админку'.", reply_markup=cb.message.reply_markup, parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_update_link")
-async def admin_update_link(cb: types.CallbackQuery, state: FSMContext):
+async def admin_update_link(cb: types.CallbackQuery, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if cb.from_user.id != ADMIN_ID:
         return await cb.answer("🚫", show_alert=True)
     await cb.message.answer("✍️ Введите новую ссылку на оплату (или 'нет', чтобы сбросить):")
     await state.set_state(AdminFSM.waiting_new_link)
 
 @dp.message(AdminFSM.waiting_new_link)
-async def process_update_link(m: types.Message, state: FSMContext):
+async def process_update_link(m: types.Message, state: FSMContext):  # ✅ ИСПРАВЛЕНО: добавлен state
     if m.from_user.id != ADMIN_ID:
         return
     global CURRENT_PAYMENT_URL
@@ -637,7 +636,7 @@ async def admin_approve_check(cb: types.CallbackQuery):
     try:
         await bot.send_message(
             target_uid,
-            "✅ <b>Ваш премиум успешно активирован!</b>\n\n"
+            f"✅ <b>Ваш премиум успешно активирован!</b>\n\n"
             f"Срок действия: до {datetime.fromtimestamp(until).strftime('%d.%m.%Y')}\n"
             "Теперь вы можете пользоваться всеми функциями без ограничений.\n\n"
             "Спасибо за оплату! 🎉",
@@ -672,6 +671,7 @@ async def admin_reject_check(cb: types.CallbackQuery):
 async def call_groq(name, occasion, holiday_type, facts, style):
     prompt = PROMPT.format(name=name, occasion=occasion, holiday_type=holiday_type, facts=facts, style=style)
     cache_key = hashlib.md5(f"{name}{occasion}{holiday_type}{facts}{style}".encode()).hexdigest()
+    
     if not hasattr(call_groq, "cache"):
         call_groq.cache = {}
     if cache_key in call_groq.cache:
@@ -693,21 +693,20 @@ async def call_groq(name, occasion, holiday_type, facts, style):
 # ========== ЗАПУСК ==========
 async def main():
     init_db()
-    
     await bot.set_chat_menu_button(
         menu_button=MenuButtonCommands(
             text="🆕 Начать",
             command="start"
         )
     )
-    
+
     await bot.set_my_commands([
         BotCommand(command="start", description="Запустить бота"),
         BotCommand(command="pay", description="Оформить подписку"),
         BotCommand(command="cancel", description="Отменить сценарий"),
         BotCommand(command="admin", description="Панель администратора")
     ])
-    
+
     logging.info("✅ Бот запущен.")
     await dp.start_polling(bot)
 
