@@ -385,7 +385,7 @@ async def new_congrats(cb: types.CallbackQuery, state: FSMContext):
     if not access["can_generate"] and access.get("reason") == "limit":
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Подписка 200₽/мес", callback_data="action_pay")]])
         remaining = 3 - access["free_used"]  # ✅ добавить
-    return await cb.message.answer(f"🎁 Осталось бесплатных попыток: {remaining}", reply_markup=kb)  # ✅ изменить
+        return await cb.message.answer(f"🎁 Осталось бесплатных попыток: {remaining}", reply_markup=kb)  # ✅ изменить
     elif not access["can_generate"] and access.get("reason") == "expired":
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Продлить подписку", callback_data="action_pay")]])
         return await cb.message.answer("❌ Премиум истёк. Продли подписку.", reply_markup=kb)
